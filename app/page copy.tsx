@@ -1,35 +1,78 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { State, City } from "country-state-city";
 
 export default function LandingPage() {
   const router = useRouter();
 
-  // Load all Nigerian states instantly from local memory on the client side
-  const statesList = useMemo(() => State.getStatesOfCountry("NG"), []);
+  const [statesList, setStatesList] = useState<string[]>([]);
+  const [lgasList, setLgasList] = useState<string[]>([]);
 
-  const [selectedStateCode, setSelectedStateCode] = useState<string>("");
+  const [selectedState, setSelectedState] = useState<string>("");
   const [selectedLga, setSelectedLga] = useState<string>("");
+  const [loadingLgas, setLoadingLgas] = useState<boolean>(false);
 
-  // Dynamically compute corresponding local governments instantly without network side-effects
-  const lgasList = useMemo(() => {
-    if (!selectedStateCode) return [];
-    return City.getCitiesOfState("NG", selectedStateCode);
-  }, [selectedStateCode]);
+  // Get the list of Nigerian states when the page loads
+  useEffect(() => {
+    async function fetchNigerianStates() {
+      try {
+        const response = await fetch(
+          "https://nga-states-lga.onrender.com/fetch",
+        );
+        if (!response.ok) throw new Error("Server error");
+        const data = await response.json();
+        setStatesList(data || []);
+      } catch (error) {
+        console.error("Could not load states:", error);
+        // Reliable fallback list so the site never breaks for users
+        setStatesList([
+          "Abia",
+          "Adamawa",
+          "Borno",
+          "FCT - Abuja",
+          "Kano",
+          "Lagos",
+          "Rivers",
+        ]);
+      }
+    }
+    fetchNigerianStates();
+  }, []);
+
+  // Fetch cities/local governments when a state is picked
+  useEffect(() => {
+    if (!selectedState) return;
+
+    async function fetchCorrespondingLgas() {
+      setLoadingLgas(true);
+      try {
+        const response = await fetch(
+          `https://nga-states-lga.onrender.com/?state=${encodeURIComponent(selectedState)}`,
+        );
+        if (!response.ok) throw new Error("Server error");
+        const data = await response.json();
+        setLgasList(data || []);
+      } catch (error) {
+        console.error("Could not load local areas:", error);
+        if (selectedState === "Rivers")
+          setLgasList(["Port Harcourt", "Obio-Akpor", "Eleme", "Bonny"]);
+        else setLgasList(["Central Area"]);
+      } finally {
+        setLoadingLgas(false);
+      }
+    }
+
+    fetchCorrespondingLgas();
+  }, [selectedState]);
 
   const handleLaunchTracker = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStateCode) return;
+    if (!selectedState) return;
 
-    const stateObj = statesList.find((s) => s.isoCode === selectedStateCode);
-    if (!stateObj) return;
-
-    // Package the cleanly structured location parameters into query strings
+    // Direct user to the map page with their chosen location details
     const query = new URLSearchParams({
-      state: stateObj.name.replace(" State", ""),
-      stateCode: selectedStateCode,
+      state: selectedState,
       ...(selectedLga && { lga: selectedLga }),
     }).toString();
 
@@ -38,9 +81,9 @@ export default function LandingPage() {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center pt-16">
-      {/* HERO SECTION: Human-friendly headings & Search Panel Controls */}
+      {/* HERO SECTION: Text & Main Search Card */}
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-12 md:py-20 lg:py-32 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-        {/* Left Side Container Layout */}
+        {/* Left Side: Human-friendly headings */}
         <div className="lg:col-span-7 space-y-4 md:space-y-6 text-center lg:text-left">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-900/50 text-xs font-medium text-emerald-400">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -59,7 +102,7 @@ export default function LandingPage() {
           </p>
         </div>
 
-        {/* Right Side Search Panel Card Layout */}
+        {/* Right Side: Simple Search Form */}
         <div className="lg:col-span-5 bg-zinc-900/40 border border-zinc-900 p-5 sm:p-6 rounded-2xl backdrop-blur-sm shadow-xl w-full max-w-md mx-auto lg:max-w-none">
           <div className="mb-6">
             <h2 className="text-lg font-bold text-zinc-100">Find Your Area</h2>
@@ -69,32 +112,34 @@ export default function LandingPage() {
           </div>
 
           <form onSubmit={handleLaunchTracker} className="space-y-4">
-            {/* Dropdown: State Parameter Field */}
+            {/* Dropdown: State Selection */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">State</label>
               <div className="relative">
                 <select
-                  value={selectedStateCode}
+                  value={selectedState}
                   onChange={(e) => {
-                    setSelectedStateCode(e.target.value);
+                    const val = e.target.value;
+                    setSelectedState(val);
                     setSelectedLga("");
+                    if (!val) setLgasList([]);
                   }}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500 font-medium transition-colors cursor-pointer appearance-none"
                 >
                   <option value="">Choose a State...</option>
                   {statesList.map((state) => (
-                    <option key={state.isoCode} value={state.isoCode}>
-                      {state.name.replace(" State", "")}
+                    <option key={state} value={state}>
+                      {state}
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-zinc-500 text-xs">
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-zinc-500">
                   ▼
                 </div>
               </div>
             </div>
 
-            {/* Dropdown: Local Government Area (LGA) Parameter Field */}
+            {/* Dropdown: LGA/City Selection */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">
                 Local Government Area (LGA)
@@ -102,18 +147,22 @@ export default function LandingPage() {
               <div className="relative">
                 <select
                   value={selectedLga}
-                  disabled={!selectedStateCode}
+                  disabled={!selectedState || loadingLgas}
                   onChange={(e) => setSelectedLga(e.target.value)}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500 font-medium transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed appearance-none"
                 >
-                  <option value="">Choose a Local Govt...</option>
-                  {lgasList.map((city) => (
-                    <option key={city.name} value={city.name}>
-                      {city.name}
+                  <option value="">
+                    {loadingLgas
+                      ? "Loading local areas..."
+                      : "Choose a Local Govt..."}
+                  </option>
+                  {lgasList.map((lga) => (
+                    <option key={lga} value={lga}>
+                      {lga}
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-zinc-500 text-xs">
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-zinc-500">
                   ▼
                 </div>
               </div>
@@ -121,8 +170,8 @@ export default function LandingPage() {
 
             <button
               type="submit"
-              disabled={!selectedStateCode}
-              className="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 text-zinc-950 disabled:text-zinc-600 font-bold text-sm py-3.5 px-4 rounded-xl transition-all duration-200 active:scale-[0.99] disabled:scale-100 shadow-md shadow-emerald-950/20"
+              disabled={!selectedState}
+              className="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 text-zinc-950 disabled:text-zinc-600 font-bold text-sm py-3.5 px-4 rounded-xl transition-all duration-200 active:scale-[0.99] disabled:scale-100"
             >
               View Active Map
             </button>
@@ -130,7 +179,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* SECTION: About Us Portal Container */}
+      {/* SECTION: About Us */}
       <section id="about" className="border-t border-zinc-900 bg-zinc-900/10">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16 md:py-24">
           <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-500 mb-2">
@@ -155,7 +204,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* SECTION: Help / Support Desk Entry Panel */}
+      {/* SECTION: Help / Support */}
       <section id="support" className="bg-zinc-950 border-t border-zinc-900">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16 text-center">
           <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-500 mb-3">
