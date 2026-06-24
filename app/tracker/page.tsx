@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { State, City } from "country-state-city";
@@ -8,163 +8,217 @@ import { State, City } from "country-state-city";
 const LiveTrackerMap = dynamic(() => import("../components/LiveTrackerMap"), {
   ssr: false,
   loading: () => (
-    <div className="h-full w-full bg-zinc-100 flex items-center justify-center text-zinc-500 font-sans text-xs">
-      LOADING MAP CANVAS...
+    <div className="h-full w-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center text-zinc-500 font-mono text-xs">
+      LOADING MAP CONTENT...
     </div>
   ),
 });
+
+interface ConflictEvent {
+  state: string;
+  lga: string;
+  month: string;
+  year: number;
+  incidentCount: number;
+  reportedCasualties: number;
+  alertType: string;
+  coordinates: [number, number];
+}
 
 function TrackerDashboardContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  const theme = searchParams.get("theme") === "light" ? "light" : "dark";
   const initialState = searchParams.get("state") || "";
   const initialLga = searchParams.get("lga") || "";
 
-  // Get the full list of Nigerian states locally
-  const statesList = State.getStatesOfCountry("NG");
-
-  // Find the initial state code if coming from the landing page
+  const statesList = useMemo(() => State.getStatesOfCountry("NG"), []);
   const initialStateObj = statesList.find(
     (s) => s.name.replace(" State", "") === initialState,
   );
+
   const [selectedStateCode, setSelectedStateCode] = useState<string>(
     initialStateObj?.isoCode || "",
   );
   const [selectedLga, setSelectedLga] = useState<string>(initialLga);
 
-  // NEW STATE: Holds custom GPS coordinates when the user requests device location
-  const [userGpsCoords, setUserGpsCoords] = useState<[number, number] | null>(
-    null,
-  );
-  const [gpsLoading, setGpsLoading] = useState<boolean>(false);
+  // Industry Standard Split Date Selection States
+  const [startMonth, setStartMonth] = useState<string>("January");
+  const [startYear, setStartYear] = useState<string>("2025");
 
-  // Get matching LGAs based on the active state code selection
+  // Strict Pagination Page Indexing State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 10; // Capped hard-limit index parameters
+
+  const [focusedLocation, setFocusedLocation] = useState<
+    [number, number] | null
+  >(null);
+  const [conflicts, setConflicts] = useState<ConflictEvent[]>([]);
+  const [loadingData, setLoadingData] = useState<boolean>(true);
+
   const lgasList = selectedStateCode
     ? City.getCitiesOfState("NG", selectedStateCode)
     : [];
-
-  const handleLocationUpdate = (stateCodeVal: string, lgaVal: string) => {
-    setUserGpsCoords(null); // Clear GPS pinpoint if dropdown filters are used
-    const stateObj = statesList.find((s) => s.isoCode === stateCodeVal);
-
-    const params = new URLSearchParams();
-    if (stateObj) params.set("state", stateObj.name.replace(" State", ""));
-    if (lgaVal) params.set("lga", lgaVal);
-    router.replace(`/tracker?${params.toString()}`);
-  };
-
-  // NEW FUNCTION: Requests browser geolocation permissions
-  const handleGetBrowserLocation = () => {
-    if (!navigator.geolocation) {
-      alert("Your browser does not support automatic location detection.");
-      return;
-    }
-
-    setGpsLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setUserGpsCoords([latitude, longitude]);
-
-        // Reset sidebar inputs to default states since we are using explicit GPS coordinates
-        setSelectedStateCode("");
-        setSelectedLga("");
-        router.replace("/tracker"); // Clear URL queries
-        setGpsLoading(false);
-      },
-      (error) => {
-        console.error("Error getting location:", error);
-        alert(
-          "Unable to retrieve your location. Please check your browser location permissions.",
-        );
-        setGpsLoading(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
-  };
-
-  // Convert selected state code back to its human-readable name for the map component
   const activeStateName =
     statesList
       .find((s) => s.isoCode === selectedStateCode)
       ?.name.replace(" State", "") || "";
 
+  // Available Years Registry Matrix
+  const yearsOptions = ["2024", "2025", "2026"];
+  const monthsOptions = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  const syncLocationParams = (stateCode: string, lgaVal: string) => {
+    const stateObj = statesList.find((s) => s.isoCode === stateCode);
+    const params = new URLSearchParams(searchParams.toString());
+    if (stateObj) params.set("state", stateObj.name.replace(" State", ""));
+    else params.delete("state");
+    if (lgaVal) params.set("lga", lgaVal);
+    else params.delete("lga");
+    router.replace(`/tracker?${params.toString()}`);
+  };
+
+  const handleUnifiedMapSelect = (stateCodeVal: string, lgaVal: string) => {
+    setSelectedStateCode(stateCodeVal);
+    setSelectedLga(lgaVal);
+    syncLocationParams(stateCodeVal, lgaVal);
+  };
+
+  useEffect(() => {
+    async function fetchConflicts() {
+      setLoadingData(true);
+      try {
+        const url = `/api/conflicts?state=${encodeURIComponent(activeStateName)}&lga=${encodeURIComponent(selectedLga)}&startYear=${startYear}`;
+
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("API network parsing failure");
+        const data = await res.json();
+
+        if (Array.isArray(data)) {
+          // Additional filtering step based on your premium Month selection choice
+          const startMonthIndex = monthsOptions.indexOf(startMonth);
+          const filteredByMonth = data.filter((item) => {
+            if (item.year > parseInt(startYear)) return true;
+            if (item.year === parseInt(startYear)) {
+              const itemMonthIndex = monthsOptions.indexOf(item.month);
+              return itemMonthIndex >= startMonthIndex;
+            }
+            return false;
+          });
+          setConflicts(filteredByMonth);
+        } else {
+          setConflicts([]);
+        }
+      } catch (err) {
+        console.error("Error formatting records:", err);
+        setConflicts([]);
+      } finally {
+        setLoadingData(false);
+      }
+    }
+
+    fetchConflicts();
+    setCurrentPage(1); // Reset back to page 1 whenever any active filter changes
+    setFocusedLocation(null);
+  }, [activeStateName, selectedLga, startMonth, startYear]);
+
+  // Strict Math Chunk Slicing Loop: Ensures EXACTLY 10 items display at a time
+  const totalPages = Math.ceil(conflicts.length / itemsPerPage);
+  const visibleConflicts = useMemo(() => {
+    const startIdx = (currentPage - 1) * itemsPerPage;
+    return conflicts.slice(startIdx, startIdx + itemsPerPage);
+  }, [conflicts, currentPage]);
+
   return (
-    <main className="h-screen w-full bg-zinc-50 flex flex-col md:flex-row pt-16 overflow-hidden text-zinc-800">
-      {/* SIDEBAR: Controls Layout */}
-      <section className="w-full md:w-80 bg-white border-b md:border-b-0 md:border-r border-zinc-200 p-5 flex flex-col justify-between shrink-0 z-20 shadow-sm">
-        <div className="space-y-6">
+    <main className="h-screen w-full bg-zinc-50 dark:bg-zinc-950 flex flex-col md:flex-row pt-16 overflow-hidden text-zinc-900 dark:text-zinc-100 transition-colors">
+      <section className="w-full md:w-[420px] bg-white dark:bg-zinc-900/60 border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-900 p-5 flex flex-col justify-between shrink-0 z-20 overflow-y-auto transition-colors">
+        <div className="space-y-5">
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-[11px] font-semibold text-emerald-700 mb-2">
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/50 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-2 border border-emerald-200 dark:border-emerald-900/30">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Live Workspace
+              Live Monitoring System
             </div>
-            <h1 className="text-lg font-bold text-zinc-900 tracking-tight">
-              Map Filters
+            <h1 className="text-base font-bold text-zinc-900 dark:text-white tracking-tight">
+              System Controls
             </h1>
-            <p className="text-xs text-zinc-500 mt-1">
-              Select an area or use your live location to view recent updates.
-            </p>
           </div>
 
-          <div className="space-y-4">
-            {/* NEW ELEMENT: Locate Me Interactive Button */}
-            <button
-              type="button"
-              onClick={handleGetBrowserLocation}
-              disabled={gpsLoading}
-              className="w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100/80 disabled:bg-zinc-100 text-emerald-700 disabled:text-zinc-400 font-bold text-xs py-3 px-4 rounded-xl transition-all border border-emerald-200/40"
-            >
-              <svg
-                className={`h-4 w-4 ${gpsLoading ? "animate-spin" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-              {gpsLoading ? "Locating Your Device..." : "Use My Location"}
-            </button>
+          {/* Upgraded Premium Dual Selector Dashboard Controls */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+              Timeline Threshold
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="relative">
+                <select
+                  value={startMonth}
+                  onChange={(e) => setStartMonth(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium transition-colors"
+                >
+                  {monthsOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
+                  ▼
+                </div>
+              </div>
 
-            <div className="relative flex py-2 items-center text-zinc-300">
-              <div className="flex-grow border-t border-zinc-200"></div>
-              <span className="flex-shrink mx-3 text-[10px] font-bold tracking-wider font-mono text-zinc-400 uppercase">
-                OR
-              </span>
-              <div className="flex-grow border-t border-zinc-200"></div>
+              <div className="relative">
+                <select
+                  value={startYear}
+                  onChange={(e) => setStartYear(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium transition-colors"
+                >
+                  {yearsOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
+                  ▼
+                </div>
+              </div>
             </div>
+          </div>
 
-            {/* State Selection */}
+          {/* Regional Geographic Filters */}
+          <div className="space-y-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-600">
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                 State
               </label>
               <div className="relative">
                 <select
                   value={selectedStateCode}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedStateCode(val);
+                    setSelectedStateCode(e.target.value);
                     setSelectedLga("");
-                    handleLocationUpdate(val, "");
+                    syncLocationParams(e.target.value, "");
                   }}
-                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-800 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors cursor-pointer appearance-none font-medium"
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium transition-colors"
                 >
                   <option value="">All States</option>
-                  {statesList.map((state) => (
-                    <option key={state.isoCode} value={state.isoCode}>
-                      {state.name.replace(" State", "")}
+                  {statesList.map((s) => (
+                    <option key={s.isoCode} value={s.isoCode}>
+                      {s.name.replace(" State", "")}
                     </option>
                   ))}
                 </select>
@@ -174,9 +228,8 @@ function TrackerDashboardContent() {
               </div>
             </div>
 
-            {/* LGA Dropdown */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-600">
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                 Local Government (LGA)
               </label>
               <div className="relative">
@@ -184,16 +237,15 @@ function TrackerDashboardContent() {
                   value={selectedLga}
                   disabled={!selectedStateCode}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedLga(val);
-                    handleLocationUpdate(selectedStateCode, val);
+                    setSelectedLga(e.target.value);
+                    syncLocationParams(selectedStateCode, e.target.value);
                   }}
-                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm text-zinc-800 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed appearance-none font-medium"
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium disabled:opacity-30 transition-colors"
                 >
-                  <option value="">All Local Governments</option>
-                  {lgasList.map((city) => (
-                    <option key={city.name} value={city.name}>
-                      {city.name}
+                  <option value="">All LGAs</option>
+                  {lgasList.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
                     </option>
                   ))}
                 </select>
@@ -203,29 +255,116 @@ function TrackerDashboardContent() {
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="mt-6 pt-4 border-t border-zinc-100 hidden md:block">
-          <div className="bg-zinc-50 rounded-xl p-3 border border-zinc-100 text-xs">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-              Active Workspace View
-            </span>
-            <p className="font-bold text-zinc-800 mt-0.5 truncate">
-              {userGpsCoords
-                ? "📍 Custom Device GPS Location"
-                : activeStateName || "Whole Country"}
-            </p>
+          {/* Dynamic Feed Segment Panel */}
+          <div className="pt-1">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                Local Safety Alerts
+              </h2>
+              {conflicts.length > 0 && (
+                <span className="text-[10px] font-mono font-bold bg-zinc-100 dark:bg-zinc-950 px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 rounded-md text-zinc-500">
+                  Total Logs: {conflicts.length}
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+              {loadingData ? (
+                <div className="text-center py-6 text-xs text-zinc-500 font-mono animate-pulse">
+                  UPDATING FEEDS...
+                </div>
+              ) : conflicts.length === 0 ? (
+                <div className="text-center py-6 text-xs text-zinc-500 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl px-4">
+                  No security incidents recorded for this criteria.
+                </div>
+              ) : (
+                <>
+                  {visibleConflicts.map((item, index) => (
+                    <div
+                      key={index}
+                      onClick={() => setFocusedLocation(item.coordinates)}
+                      className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl p-4 space-y-2 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 transition-all cursor-pointer transform hover:-translate-y-0.5 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            item.alertType === "Armed Clashes & Attacks"
+                              ? "bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40"
+                              : "bg-red-100 dark:bg-red-950/50 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-900/40"
+                          }`}
+                        >
+                          {item.alertType}
+                        </span>
+                        <span className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
+                          {item.month} {item.year}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">
+                        {item.lga}, {item.state}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-900/60 text-[11px] font-medium">
+                        <div className="text-zinc-500 dark:text-zinc-400">
+                          Incidents:{" "}
+                          <span className="text-zinc-900 dark:text-zinc-100 font-bold font-mono">
+                            {item.incidentCount}
+                          </span>
+                        </div>
+                        <div className="text-zinc-500 dark:text-zinc-400">
+                          Casualties:{" "}
+                          <span
+                            className={`${item.reportedCasualties > 0 ? "text-red-500 dark:text-red-400 font-bold" : "text-zinc-500 dark:text-zinc-400"} font-mono`}
+                          >
+                            {item.reportedCasualties}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Clean, Non-Expanding Pagination Row View Controls */}
+                  {totalPages > 1 && (
+                    <div className="grid grid-cols-3 items-center gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-900 text-xs font-semibold text-zinc-500">
+                      <button
+                        disabled={currentPage === 1}
+                        onClick={() =>
+                          setCurrentPage((prev) => Math.max(prev - 1, 1))
+                        }
+                        className="py-2 text-center bg-zinc-100 dark:bg-zinc-900 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-30 border border-zinc-200 dark:border-zinc-800 transition-colors"
+                      >
+                        ◀ Back
+                      </button>
+                      <div className="text-center font-mono text-[11px] text-zinc-400">
+                        Page {currentPage} / {totalPages}
+                      </div>
+                      <button
+                        disabled={currentPage === totalPages}
+                        onClick={() =>
+                          setCurrentPage((prev) =>
+                            Math.min(prev + 1, totalPages),
+                          )
+                        }
+                        className="py-2 text-center bg-zinc-100 dark:bg-zinc-900 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-30 border border-zinc-200 dark:border-zinc-800 transition-colors"
+                      >
+                        Next ▶
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* MAP CANVAS VIEWPORT */}
-      <section className="flex-grow h-full relative z-10 bg-zinc-100">
-        {/* Pass the dynamic GPS coordinate values down into the map component wrapper */}
+      <section className="flex-grow h-full relative z-10">
         <LiveTrackerMap
           stateName={activeStateName}
           lgaName={selectedLga}
-          gpsCoords={userGpsCoords}
+          eventsList={conflicts}
+          onMapLocationSelect={handleUnifiedMapSelect}
+          cardFocusedCoords={focusedLocation}
+          theme={theme}
         />
       </section>
     </main>
@@ -236,8 +375,8 @@ export default function TrackerDashboard() {
   return (
     <Suspense
       fallback={
-        <div className="h-screen w-full bg-zinc-50 flex items-center justify-center text-zinc-500 font-sans text-sm">
-          Opening security console...
+        <div className="h-screen w-full bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center text-zinc-500 text-sm">
+          Opening secure dashboard console...
         </div>
       }
     >

@@ -1,71 +1,84 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSuspenseInfra } from "react";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Unified global URL query theme controller state
+  const theme = searchParams.get("theme") === "light" ? "light" : "dark";
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "light" ? "dark" : "light";
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("theme", nextTheme);
+    router.replace(`?${params.toString()}`);
+  };
 
   return (
     <html
       lang="en"
-      className="dark bg-zinc-950 text-zinc-100 selection:bg-emerald-500 selection:text-zinc-950 scroll-smooth"
+      className={`${theme === "dark" ? "dark bg-zinc-950 text-zinc-100" : "bg-zinc-50 text-zinc-900"} selection:bg-emerald-500 selection:text-zinc-950 scroll-smooth`}
     >
       <body
-        className={`${inter.className} min-h-screen flex flex-col justify-between antialiased`}
+        className={`${inter.className} min-h-screen flex flex-col justify-between antialiased bg-zinc-50 dark:bg-zinc-950 transition-colors`}
       >
-        {/* RESPONSIVE BORDERLESS HEADER */}
-        <header className="fixed top-0 left-0 right-0 z-[500] bg-zinc-950/70 backdrop-blur-md transition-all duration-300">
+        <header className="fixed top-0 left-0 right-0 z-[500] bg-white/70 dark:bg-zinc-950/70 border-b border-zinc-200 dark:border-zinc-900 backdrop-blur-md transition-all duration-300">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-            {/* Logo */}
             <div className="flex items-center gap-2">
               <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <Link
                 href="/"
-                className="font-bold tracking-tight text-lg uppercase bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent"
+                className="font-bold tracking-tight text-lg uppercase bg-gradient-to-r from-zinc-900 dark:from-white to-zinc-500 dark:to-zinc-400 bg-clip-text text-transparent"
               >
                 Conflict<span className="text-emerald-500">Tracker</span>
               </Link>
             </div>
 
-            {/* Desktop Navigation Links (Hidden on mobile) */}
-            <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-zinc-400">
+            <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-zinc-500 dark:text-zinc-400">
               <Link
                 href="/tracker"
-                className="text-emerald-400 hover:text-emerald-300 transition-colors"
+                className="text-emerald-500 font-bold hover:text-emerald-400 transition-colors"
               >
                 Map
               </Link>
               <a
                 href="#about"
-                className="hover:text-zinc-200 transition-colors"
+                className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
               >
                 About Us
               </a>
               <a
                 href="#support"
-                className="hover:text-zinc-200 transition-colors"
+                className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
               >
                 Support
               </a>
             </nav>
 
-            {/* Desktop Status Badge (Hidden on mobile) */}
-            <div className="hidden md:flex items-center">
-              <span className="text-xs font-mono bg-zinc-900 px-3 py-1.5 rounded-full border border-zinc-800 text-zinc-500">
+            <div className="hidden md:flex items-center gap-4">
+              {/* Theme Toggle Button integrated elegantly on the right of the desktop navbar */}
+              <button
+                onClick={toggleTheme}
+                type="button"
+                className="px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center gap-2 shadow-sm"
+              >
+                {theme === "light" ? "🌙 Dark" : "☀️ Light"}
+              </button>
+              <span className="text-xs font-mono bg-zinc-100 dark:bg-zinc-900 px-3 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-800 text-zinc-500">
                 Region: NG // Live
               </span>
             </div>
 
-            {/* Mobile Hamburger Menu Toggle Button (Visible only on mobile) */}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               type="button"
@@ -74,7 +87,6 @@ export default function RootLayout({
             >
               <span className="sr-only">Toggle navigation menu</span>
               {isMobileMenuOpen ? (
-                // Close icon (X)
                 <svg
                   className="h-6 w-6"
                   fill="none"
@@ -89,7 +101,6 @@ export default function RootLayout({
                   />
                 </svg>
               ) : (
-                // Open icon (Hamburger lines)
                 <svg
                   className="h-6 w-6"
                   fill="none"
@@ -107,33 +118,27 @@ export default function RootLayout({
             </button>
           </div>
 
-          {/* Mobile Overlay Navigation Menu (Toggled via button) */}
           {isMobileMenuOpen && (
-            <div className="md:hidden bg-zinc-950 border-t border-zinc-900/60 shadow-xl transition-all duration-200">
+            <div className="md:hidden bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-900 shadow-xl transition-all duration-200">
               <div className="px-4 pt-3 pb-6 space-y-3 font-medium text-sm">
                 <Link
                   href="/tracker"
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className="block px-3 py-2.5 rounded-xl text-emerald-400 bg-emerald-950/20 transition-colors"
+                  className="block px-3 py-2.5 rounded-xl text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 transition-colors"
                 >
                   Map
                 </Link>
-                <a
-                  href="#about"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="block px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 transition-colors"
+                <button
+                  onClick={() => {
+                    toggleTheme();
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left block px-3 py-2.5 rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
                 >
-                  About Us
-                </a>
-                <a
-                  href="#support"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="block px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 transition-colors"
-                >
-                  Support
-                </a>
+                  {theme === "light" ? "🌙 Dark Mode" : "☀️ Light Mode"}
+                </button>
                 <div className="pt-2 px-3">
-                  <span className="inline-block text-[11px] font-mono bg-zinc-900 px-3 py-1.5 rounded-full text-zinc-500 border border-zinc-800">
+                  <span className="inline-block text-[11px] font-mono bg-zinc-100 dark:bg-zinc-900 px-3 py-1.5 rounded-full text-zinc-500 border border-zinc-200 dark:border-zinc-800">
                     Region: NG // Live
                   </span>
                 </div>
@@ -142,11 +147,9 @@ export default function RootLayout({
           )}
         </header>
 
-        {/* MAIN CONTAINER WORKSPACE */}
         <div className="flex-grow">{children}</div>
 
-        {/* SYSTEM FOOTER */}
-        <footer className="bg-zinc-950 border-t border-zinc-900 py-6 text-xs text-zinc-500 font-mono">
+        <footer className="bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-900 py-6 text-xs text-zinc-500 font-mono transition-colors">
           <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-center sm:text-left">
               &copy; {new Date().getFullYear()} Conflict Tracker Nigeria. All
@@ -167,5 +170,17 @@ export default function RootLayout({
         </footer>
       </body>
     </html>
+  );
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <Suspense fallback={null}>
+      <LayoutHeaderAndContent>{children}</LayoutHeaderAndContent>
+    </Suspense>
   );
 }

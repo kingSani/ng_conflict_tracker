@@ -1,10 +1,28 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { State, City } from "country-state-city";
 
 export default function LandingPage() {
+  interface ConflictEvent {
+    state: string;
+    lga: string;
+    month: string;
+    year: number;
+    incidentCount: number;
+    reportedCasualties: number;
+    type: string;
+  }
+  const [previewAlerts, setPreviewAlerts] = useState<ConflictEvent[]>([]);
+
+  useEffect(() => {
+    // Pull default overview metrics directly from the new shared API route
+    fetch("/api/conflicts?startYear=2026")
+      .then((res) => res.json())
+      .then((data) => setPreviewAlerts(data.slice(0, 3)))
+      .catch((err) => console.error(err));
+  }, []);
   const router = useRouter();
 
   // Load all Nigerian states instantly from local memory on the client side
@@ -131,26 +149,39 @@ export default function LandingPage() {
       </section>
 
       {/* SECTION: About Us Portal Container */}
-      <section id="about" className="border-t border-zinc-900 bg-zinc-900/10">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16 md:py-24">
+      <section className="border-t border-zinc-900 bg-zinc-900/10 py-16">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6">
           <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-500 mb-2">
-            About This Project
+            Live Situation Briefing
           </h2>
-          <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-4 sm:mb-6">
-            Making safety information clear and accessible to everyone.
+          <h3 className="text-2xl font-extrabold text-white mb-6">
+            Recent Escalation Previews (Current Month)
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 text-zinc-400 text-sm leading-relaxed">
-            <p>
-              Our conflict tracker is built to help ordinary citizens,
-              travelers, and community members understand exactly what is going
-              on in different regions. We pull verified reports from reliable
-              news sources and security agencies to keep you informed.
-            </p>
-            <p>
-              By separating our main home screen from the heavy visual map, we
-              ensure the site runs incredibly fast even on slower mobile phone
-              networks and devices across Nigeria.
-            </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {previewAlerts.map((alert, idx) => (
+              <div
+                key={idx}
+                className="bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-4 space-y-2"
+              >
+                <div className="flex justify-between items-center text-[10px] font-mono">
+                  <span className="text-emerald-400 font-bold">
+                    {alert.type}
+                  </span>
+                  <span className="text-zinc-500">
+                    {alert.month} {alert.year}
+                  </span>
+                </div>
+                <p className="text-sm font-bold text-white truncate">
+                  {alert.lga}, {alert.state} State
+                </p>
+                <p className="text-xs text-zinc-400">
+                  Recorded Fatalities:{" "}
+                  <span className="text-red-500 font-bold font-mono">
+                    {alert.reportedCasualties}
+                  </span>
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
