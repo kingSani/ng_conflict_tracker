@@ -18,18 +18,13 @@ import "leaflet-defaulticon-compatibility";
 interface LiveTrackerMapProps {
   stateName: string;
   lgaName: string;
+  gpsCoords?: [number, number] | null;
 }
 
 const NIGERIA_CENTER_FALLBACK: [number, number] = [9.082, 8.6753];
 
-// 1. Define a strict bounding box around Nigeria [South-West corner, North-East corner]
-// This prevents the user from panning away to other countries or oceans.
-const NIGERIA_BOUNDS = L.latLngBounds(
-  L.latLng(4.0, 2.5), // Southern/Western limits (near Lagos/ocean borders)
-  L.latLng(14.0, 15.0), // Northern/Eastern limits (near Lake Chad/Sokoto borders)
-);
+const NIGERIA_BOUNDS = L.latLngBounds(L.latLng(4.0, 2.5), L.latLng(14.0, 15.0));
 
-// Companion component to smoothly pan and zoom the map camera
 function MapRecenterController({
   coordinates,
   zoomLevel,
@@ -38,15 +33,12 @@ function MapRecenterController({
   zoomLevel: number;
 }) {
   const map = useMap();
-
   useEffect(() => {
     map.flyTo(coordinates, zoomLevel, { animate: true, duration: 1.2 });
   }, [coordinates, zoomLevel, map]);
-
   return null;
 }
 
-// 2. NEW COMPONENT: Handles user clicks directly on the map surface
 function MapClickHandler({
   onMapClick,
 }: {
@@ -54,7 +46,6 @@ function MapClickHandler({
 }) {
   useMapEvents({
     click(e) {
-      // Captures the exact point where the user clicked
       onMapClick([e.latlng.lat, e.latlng.lng]);
     },
   });
@@ -64,22 +55,42 @@ function MapClickHandler({
 export default function LiveTrackerMap({
   stateName,
   lgaName,
+  gpsCoords,
 }: LiveTrackerMapProps) {
-  // State to hold custom point coordinates clicked by the user
   const [customClickCoords, setCustomClickCoords] = useState<
     [number, number] | null
   >(null);
 
-  // Calculate default coordinates dynamically on the fly during render
+  // Track parameters to know if the dropdown filters changed since the last user click
+  const [lastFilterKey, setLastFilterKey] = useState<string>(
+    `${stateName}-${lgaName}-${gpsCoords?.[0] || 0}`,
+  );
+
+  // Derived current key string representing current props setup
+  const currentFilterKey = `${stateName}-${lgaName}-${gpsCoords?.[0] || 0}`;
+
   let mapCenter: [number, number] = NIGERIA_CENTER_FALLBACK;
   let zoomLevel = 6;
   let isLocationSelected = false;
 
-  if (stateName) {
+  // Priority 1: User requested device GPS coordinates location
+  if (gpsCoords) {
+    mapCenter = gpsCoords;
+    zoomLevel = 14;
+    isLocationSelected = true;
+  }
+  // Priority 2: Standard dropdown selector navigation filtering
+  else if (stateName) {
     const internalStates = State.getStatesOfCountry("NG");
+    const normalizedSearchState = stateName
+      .toLowerCase()
+      .trim()
+      .replace(" state", "");
+
     const matchedState = internalStates.find(
       (s) =>
-        s.name.toLowerCase().replace(" state", "") === stateName.toLowerCase(),
+        s.name.toLowerCase().trim().replace(" state", "") ===
+        normalizedSearchState,
     );
 
     if (matchedState) {
@@ -87,16 +98,34 @@ export default function LiveTrackerMap({
 
       if (lgaName) {
         const cities = City.getCitiesOfState("NG", matchedState.isoCode);
-        const matchedCity = cities.find(
-          (c) => c.name.toLowerCase() === lgaName.toLowerCase(),
-        );
+        const cleanSearchLga = lgaName
+          .toLowerCase()
+          .trim()
+          .replace(/[-\s]/g, "");
+
+        const matchedCity = cities.find((c) => {
+          const cleanLibraryCity = c.name
+            .toLowerCase()
+            .trim()
+            .replace(/[-\s]/g, "");
+          return (
+            cleanLibraryCity.includes(cleanSearchLga) ||
+            cleanSearchLga.includes(cleanLibraryCity)
+          );
+        });
 
         if (matchedCity && matchedCity.latitude && matchedCity.longitude) {
           mapCenter = [
             parseFloat(matchedCity.latitude),
             parseFloat(matchedCity.longitude),
           ];
-          zoomLevel = 11;
+          zoomLevel = 12;
+        } else if (matchedState.latitude && matchedState.longitude) {
+          mapCenter = [
+            parseFloat(matchedState.latitude),
+            parseFloat(matchedState.longitude),
+          ];
+          zoomLevel = 9;
         }
       } else if (matchedState.latitude && matchedState.longitude) {
         mapCenter = [
@@ -108,17 +137,14 @@ export default function LiveTrackerMap({
     }
   }
 
-  // Clear any custom clicked points if the top sidebar filters change
-  useEffect(() => {
-    setCustomClickCoords(null);
-  }, [stateName, lgaName]);
+  // Determine if a custom click pin is valid or if the user updated filters afterward
+  const dynamicClickCoords =
+    currentFilterKey === lastFilterKey ? customClickCoords : null;
 
-  const handleMapSurfaceClick = (coords: [number, number]) => {
+  const handleManualMapClick = (coords: [number, number]) => {
+    // Keep our filter key value matched to current props on manual user interaction clicks
+    setLastFilterKey(currentFilterKey);
     setCustomClickCoords(coords);
-    console.log(
-      `User clicked map coordinates: Latitude: ${coords[0]}, Longitude: ${coords[1]}`,
-    );
-    // Tip: You can pass this handler up to your parent component to trigger incident reports!
   };
 
   return (
@@ -126,9 +152,9 @@ export default function LiveTrackerMap({
       <MapContainer
         center={mapCenter}
         zoom={zoomLevel}
-        minZoom={6} // Restricts zooming out too far (stops world map from showing)
-        maxBounds={NIGERIA_BOUNDS} // Locks map dragging strictly inside Nigeria's limits
-        maxBoundsViscosity={1.0} // 1.0 means completely solid walls—users cannot drag past borders at all
+        minZoom={6}
+        maxBounds={NIGERIA_BOUNDS}
+        maxBoundsViscosity={1.0}
         style={{ height: "100%", width: "100%", background: "#f4f4f5" }}
       >
         <TileLayer
@@ -136,53 +162,63 @@ export default function LiveTrackerMap({
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
         />
 
-        {/* Listens for map surface tap gestures */}
-        <MapClickHandler onMapClick={handleMapSurfaceClick} />
+        {/* Custom click handler updates click coordinates along with current filter state context info */}
+        <MapClickHandler onMapClick={handleManualMapClick} />
 
-        {/* Animates map camera shifts when sidebar choices change */}
         <MapRecenterController coordinates={mapCenter} zoomLevel={zoomLevel} />
 
-        {/* PIN A: Drop filter pin based on Sidebar Selection Dropdowns */}
-        {isLocationSelected && !customClickCoords && (
+        {/* Display Primary Filter/GPS Tracking Marker Pin */}
+        {isLocationSelected && !dynamicClickCoords && (
           <Marker
-            key={`filter-${mapCenter[0]}-${mapCenter[1]}`}
+            key={`focused-${mapCenter[0]}-${mapCenter[1]}`}
             position={mapCenter}
           >
             <Popup>
               <div className="font-sans p-1">
-                <p className="font-bold text-sm text-emerald-700">
-                  {stateName}
-                </p>
-                {lgaName && (
-                  <p className="text-xs font-semibold text-zinc-600 mt-0.5">
-                    LGA: {lgaName}
-                  </p>
+                {gpsCoords ? (
+                  <>
+                    <p className="font-bold text-sm text-emerald-700">
+                      Your Current Location
+                    </p>
+                    <p className="text-[10px] text-zinc-400 mt-1 font-mono">
+                      Lat: {gpsCoords[0].toFixed(4)}, Lng:{" "}
+                      {gpsCoords[1].toFixed(4)}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-bold text-sm text-emerald-700">
+                      {stateName}
+                    </p>
+                    {lgaName && (
+                      <p className="text-xs font-semibold text-zinc-600 mt-0.5">
+                        LGA Focus: {lgaName}
+                      </p>
+                    )}
+                  </>
                 )}
                 <p className="text-[10px] text-zinc-400 mt-2 border-t pt-1 border-zinc-100">
-                  Filtered Region Focus
+                  Monitoring Active Area
                 </p>
               </div>
             </Popup>
           </Marker>
         )}
 
-        {/* PIN B: Drop a custom marker exactly where the user explicitly clicked */}
-        {customClickCoords && (
+        {/* Display Manual User Selection Surface Tap Drop Markers */}
+        {dynamicClickCoords && (
           <Marker
-            key={`click-${customClickCoords[0]}-${customClickCoords[1]}`}
-            position={customClickCoords}
+            key={`click-${dynamicClickCoords[0]}-${dynamicClickCoords[1]}`}
+            position={dynamicClickCoords}
           >
             <Popup>
               <div className="font-sans p-1">
                 <p className="font-bold text-sm text-zinc-800">
-                  Selected Custom Location
+                  Custom Position Drop
                 </p>
                 <p className="text-xs font-mono text-zinc-500 mt-1 bg-zinc-100 p-1 rounded border">
-                  Lat: {customClickCoords[0].toFixed(4)} <br />
-                  Lng: {customClickCoords[1].toFixed(4)}
-                </p>
-                <p className="text-[10px] text-emerald-600 font-bold mt-2">
-                  Ready to map local security alerts...
+                  Lat: {dynamicClickCoords[0].toFixed(4)} <br />
+                  Lng: {dynamicClickCoords[1].toFixed(4)}
                 </p>
               </div>
             </Popup>
