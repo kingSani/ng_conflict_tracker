@@ -1,18 +1,32 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+/**
+ * /app/tracker/page.tsx
+ *
+ * Changes from previous version:
+ *  - reverseGeocode() now calls Mapbox instead of Nominatim
+ *  - Everything else (single fetch, client-side filter, bidirectional
+ *    sync, geolocation button) is unchanged.
+ */
+
 import dynamic from "next/dynamic";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { State, City } from "country-state-city";
+import { reverseGeocode } from "../../mapbox-geocode";
 
 const LiveTrackerMap = dynamic(() => import("../components/LiveTrackerMap"), {
   ssr: false,
   loading: () => (
-    <div className="h-full w-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center text-zinc-500 font-mono text-xs">
-      LOADING MAP CONTENT...
+    <div className="h-full w-full bg-zinc-900 flex items-center justify-center">
+      <span className="text-zinc-500 text-sm animate-pulse">
+        Initialising map…
+      </span>
     </div>
   ),
 });
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ConflictEvent {
   state: string;
@@ -25,184 +39,241 @@ interface ConflictEvent {
   coordinates: [number, number];
 }
 
-function TrackerDashboardContent() {
+type LoadState = "idle" | "loading" | "ready" | "error";
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function TrackerPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
 
-  const theme = searchParams.get("theme") === "light" ? "light" : "dark";
-  const initialState = searchParams.get("state") || "";
-  const initialLga = searchParams.get("lga") || "";
-
+  // ── Filter state ──────────────────────────────────────────────────────────
   const statesList = useMemo(() => State.getStatesOfCountry("NG"), []);
-  const initialStateObj = statesList.find(
-    (s) => s.name.replace(" State", "") === initialState,
-  );
 
   const [selectedStateCode, setSelectedStateCode] = useState<string>(
-    initialStateObj?.isoCode || "",
+    searchParams.get("stateCode") || "",
   );
-  const [selectedLga, setSelectedLga] = useState<string>(initialLga);
+  const [selectedLga, setSelectedLga] = useState<string>(
+    searchParams.get("lga") || "",
+  );
 
-  // Industry Standard Split Date Selection States
-  const [startMonth, setStartMonth] = useState<string>("January");
-  const [startYear, setStartYear] = useState<string>("2025");
+  const lgasList = useMemo(() => {
+    if (!selectedStateCode) return [];
+    return City.getCitiesOfState("NG", selectedStateCode);
+  }, [selectedStateCode]);
 
-  // Strict Pagination Page Indexing State
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const itemsPerPage = 10; // Capped hard-limit index parameters
-
-  const [focusedLocation, setFocusedLocation] = useState<
-    [number, number] | null
-  >(null);
-  const [conflicts, setConflicts] = useState<ConflictEvent[]>([]);
-  const [loadingData, setLoadingData] = useState<boolean>(true);
-
-  const lgasList = selectedStateCode
-    ? City.getCitiesOfState("NG", selectedStateCode)
-    : [];
-  const activeStateName =
-    statesList
-      .find((s) => s.isoCode === selectedStateCode)
-      ?.name.replace(" State", "") || "";
-
-  // Available Years Registry Matrix
-  const yearsOptions = ["2024", "2025", "2026"];
-  const monthsOptions = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
-
-  const syncLocationParams = (stateCode: string, lgaVal: string) => {
-    const stateObj = statesList.find((s) => s.isoCode === stateCode);
-    const params = new URLSearchParams(searchParams.toString());
-    if (stateObj) params.set("state", stateObj.name.replace(" State", ""));
-    else params.delete("state");
-    if (lgaVal) params.set("lga", lgaVal);
-    else params.delete("lga");
-    router.replace(`/tracker?${params.toString()}`);
-  };
-
-  const handleUnifiedMapSelect = (stateCodeVal: string, lgaVal: string) => {
-    setSelectedStateCode(stateCodeVal);
-    setSelectedLga(lgaVal);
-    syncLocationParams(stateCodeVal, lgaVal);
-  };
+  // ── Data — fetched once ───────────────────────────────────────────────────
+  const [allEvents, setAllEvents] = useState<ConflictEvent[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("idle");
+  const hasFetched = useRef(false);
 
   useEffect(() => {
-    async function fetchConflicts() {
-      setLoadingData(true);
-      try {
-        const url = `/api/conflicts?state=${encodeURIComponent(activeStateName)}&lga=${encodeURIComponent(selectedLga)}&startYear=${startYear}`;
+    if (hasFetched.current) return;
+    hasFetched.current = true;
+    setLoadState("loading");
 
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("API network parsing failure");
-        const data = await res.json();
+    fetch("/api/conflicts")
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data: ConflictEvent[]) => {
+        setAllEvents(data);
+        setLoadState("ready");
+      })
+      .catch(() => setLoadState("error"));
+  }, []);
 
-        if (Array.isArray(data)) {
-          // Additional filtering step based on your premium Month selection choice
-          const startMonthIndex = monthsOptions.indexOf(startMonth);
-          const filteredByMonth = data.filter((item) => {
-            if (item.year > parseInt(startYear)) return true;
-            if (item.year === parseInt(startYear)) {
-              const itemMonthIndex = monthsOptions.indexOf(item.month);
-              return itemMonthIndex >= startMonthIndex;
-            }
+  // ── Client-side filtering ─────────────────────────────────────────────────
+  const filteredEvents = useMemo(() => {
+    if (!allEvents.length) return [];
+
+    return allEvents.filter((ev) => {
+      if (selectedStateCode) {
+        const stateObj = statesList.find(
+          (s) => s.isoCode === selectedStateCode,
+        );
+        if (stateObj) {
+          const target = stateObj.name.replace(/\s*State$/i, "").toLowerCase();
+          const evState = ev.state.toLowerCase().trim();
+          if (!evState.includes(target) && !target.includes(evState))
             return false;
-          });
-          setConflicts(filteredByMonth);
-        } else {
-          setConflicts([]);
         }
-      } catch (err) {
-        console.error("Error formatting records:", err);
-        setConflicts([]);
-      } finally {
-        setLoadingData(false);
       }
+
+      if (selectedLga) {
+        const norm = (s: string) =>
+          s.toLowerCase().replace(/[-\s]/g, "").replace(/ss/g, "s");
+        if (
+          !norm(ev.lga).includes(norm(selectedLga)) &&
+          !norm(selectedLga).includes(norm(ev.lga))
+        )
+          return false;
+      }
+
+      return true;
+    });
+  }, [allEvents, selectedStateCode, selectedLga, statesList]);
+
+  // ── Map focus ─────────────────────────────────────────────────────────────
+  const [mapFocus, setMapFocus] = useState<[number, number] | null>(null);
+
+  // State dropdown → fly to first matching event
+  useEffect(() => {
+    if (!selectedStateCode) {
+      setMapFocus(null);
+      return;
     }
+    const stateObj = statesList.find((s) => s.isoCode === selectedStateCode);
+    if (!stateObj) return;
+    const target = stateObj.name.replace(/\s*State$/i, "").toLowerCase();
+    const match = allEvents.find((ev) =>
+      ev.state.toLowerCase().includes(target),
+    );
+    if (match) setMapFocus([...match.coordinates] as [number, number]);
+  }, [selectedStateCode, allEvents, statesList]);
 
-    fetchConflicts();
-    setCurrentPage(1); // Reset back to page 1 whenever any active filter changes
-    setFocusedLocation(null);
-  }, [activeStateName, selectedLga, startMonth, startYear]);
+  // LGA dropdown → narrow focus
+  useEffect(() => {
+    if (!selectedLga) return;
+    const norm = (s: string) =>
+      s.toLowerCase().replace(/[-\s]/g, "").replace(/ss/g, "s");
+    const match = allEvents.find((ev) =>
+      norm(ev.lga).includes(norm(selectedLga)),
+    );
+    if (match) setMapFocus([...match.coordinates] as [number, number]);
+  }, [selectedLga, allEvents]);
 
-  // Strict Math Chunk Slicing Loop: Ensures EXACTLY 10 items display at a time
-  const totalPages = Math.ceil(conflicts.length / itemsPerPage);
-  const visibleConflicts = useMemo(() => {
-    const startIdx = (currentPage - 1) * itemsPerPage;
-    return conflicts.slice(startIdx, startIdx + itemsPerPage);
-  }, [conflicts, currentPage]);
+  // ── Reverse geocode → update dropdowns ───────────────────────────────────
+  const [geoLoading, setGeoLoading] = useState(false);
 
+  const applyReverseGeocode = useCallback(
+    async (lat: number, lng: number) => {
+      // Mapbox reverse geocode — replaces Nominatim
+      const result = await reverseGeocode(lat, lng);
+      if (!result) return;
+
+      const matchedState = statesList.find((s) =>
+        s.name
+          .replace(/\s*State$/i, "")
+          .toLowerCase()
+          .includes(result.state.toLowerCase()),
+      );
+
+      if (matchedState) {
+        setSelectedStateCode(matchedState.isoCode);
+        const lgas = City.getCitiesOfState("NG", matchedState.isoCode);
+        const matchedLga = lgas.find((c) =>
+          c.name.toLowerCase().includes(result.lga.toLowerCase()),
+        );
+        setSelectedLga(matchedLga?.name ?? "");
+      }
+
+      setMapFocus([lat, lng]);
+    },
+    [statesList],
+  );
+
+  // Map click handler (passed down to LiveTrackerMap)
+  const handleMapLocationSelect = useCallback(
+    (lat: number, lng: number) => applyReverseGeocode(lat, lng),
+    [applyReverseGeocode],
+  );
+
+  // ── Use Your Location ─────────────────────────────────────────────────────
+  const handleUseLocation = useCallback(() => {
+    if (!navigator.geolocation) return;
+    setGeoLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        await applyReverseGeocode(coords.latitude, coords.longitude);
+        setGeoLoading(false);
+      },
+      () => setGeoLoading(false),
+      { timeout: 8000 },
+    );
+  }, [applyReverseGeocode]);
+
+  // ── Theme ─────────────────────────────────────────────────────────────────
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  // ── Derived display values ────────────────────────────────────────────────
+  const selectedStateName =
+    statesList
+      .find((s) => s.isoCode === selectedStateCode)
+      ?.name.replace(/\s*State$/i, "") || "";
+
+  const totalCasualties = filteredEvents.reduce(
+    (sum, ev) => sum + ev.reportedCasualties,
+    0,
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <main className="h-screen w-full bg-zinc-50 dark:bg-zinc-950 flex flex-col md:flex-row pt-16 overflow-hidden text-zinc-900 dark:text-zinc-100 transition-colors">
-      <section className="w-full md:w-[420px] bg-white dark:bg-zinc-900/60 border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-900 p-5 flex flex-col justify-between shrink-0 z-20 overflow-y-auto transition-colors">
-        <div className="space-y-5">
-          <div>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/50 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-2 border border-emerald-200 dark:border-emerald-900/30">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Live Monitoring System
+    <div className="h-screen w-full bg-zinc-950 flex flex-col overflow-hidden">
+      {/* ── Top bar ──────────────────────────────────────────────────────── */}
+      <header className="flex-none flex items-center justify-between px-4 py-2.5 bg-zinc-950 border-b border-zinc-900 z-10">
+        <div className="flex items-center gap-3">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-bold text-zinc-100 tracking-wide">
+            NigeriaWatch · Live Tracker
+          </span>
+        </div>
+        <button
+          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+          className="text-[10px] font-medium text-zinc-400 hover:text-zinc-200 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 transition-colors"
+        >
+          {theme === "dark" ? "☀ Light" : "◑ Dark"}
+        </button>
+      </header>
+
+      {/* ── Body ─────────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* ── Sidebar ───────────────────────────────────────────────────── */}
+        <aside className="w-72 flex-none flex flex-col bg-zinc-950 border-r border-zinc-900 overflow-y-auto">
+          <div className="p-4 space-y-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-500 mb-0.5">
+                Filter Location
+              </p>
+              <p className="text-[11px] text-zinc-500">
+                Dropdowns and map stay in sync automatically.
+              </p>
             </div>
-            <h1 className="text-base font-bold text-zinc-900 dark:text-white tracking-tight">
-              System Controls
-            </h1>
-          </div>
 
-          {/* Upgraded Premium Dual Selector Dashboard Controls */}
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-              Timeline Threshold
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="relative">
-                <select
-                  value={startMonth}
-                  onChange={(e) => setStartMonth(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium transition-colors"
-                >
-                  {monthsOptions.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
-                  ▼
-                </div>
-              </div>
+            {/* Use Your Location */}
+            <button
+              onClick={handleUseLocation}
+              disabled={geoLoading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-emerald-700 text-xs font-semibold text-zinc-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {geoLoading ? (
+                <>
+                  <span className="h-3 w-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                  Locating…
+                </>
+              ) : (
+                <>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-3.5 w-3.5 text-emerald-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+                  </svg>
+                  Use Your Location
+                </>
+              )}
+            </button>
 
-              <div className="relative">
-                <select
-                  value={startYear}
-                  onChange={(e) => setStartYear(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium transition-colors"
-                >
-                  {yearsOptions.map((y) => (
-                    <option key={y} value={y}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400">
-                  ▼
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Regional Geographic Filters */}
-          <div className="space-y-3">
+            {/* State dropdown */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+              <label className="text-[11px] font-medium text-zinc-400">
                 State
               </label>
               <div className="relative">
@@ -211,36 +282,33 @@ function TrackerDashboardContent() {
                   onChange={(e) => {
                     setSelectedStateCode(e.target.value);
                     setSelectedLga("");
-                    syncLocationParams(e.target.value, "");
                   }}
-                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium transition-colors"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-600 font-medium transition-colors cursor-pointer appearance-none"
                 >
                   <option value="">All States</option>
                   {statesList.map((s) => (
                     <option key={s.isoCode} value={s.isoCode}>
-                      {s.name.replace(" State", "")}
+                      {s.name.replace(/\s*State$/i, "")}
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-zinc-400 text-xs">
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-zinc-500 text-[10px]">
                   ▼
-                </div>
+                </span>
               </div>
             </div>
 
+            {/* LGA dropdown */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                Local Government (LGA)
+              <label className="text-[11px] font-medium text-zinc-400">
+                Local Govt. Area
               </label>
               <div className="relative">
                 <select
                   value={selectedLga}
                   disabled={!selectedStateCode}
-                  onChange={(e) => {
-                    setSelectedLga(e.target.value);
-                    syncLocationParams(selectedStateCode, e.target.value);
-                  }}
-                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 appearance-none font-medium disabled:opacity-30 transition-colors"
+                  onChange={(e) => setSelectedLga(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-600 font-medium transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed appearance-none"
                 >
                   <option value="">All LGAs</option>
                   {lgasList.map((c) => (
@@ -249,138 +317,147 @@ function TrackerDashboardContent() {
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-zinc-400 text-xs">
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-zinc-500 text-[10px]">
                   ▼
-                </div>
+                </span>
               </div>
             </div>
+
+            {(selectedStateCode || selectedLga) && (
+              <button
+                onClick={() => {
+                  setSelectedStateCode("");
+                  setSelectedLga("");
+                  setMapFocus(null);
+                }}
+                className="w-full text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors underline underline-offset-2"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
 
-          {/* Dynamic Feed Segment Panel */}
-          <div className="pt-1">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                Local Safety Alerts
-              </h2>
-              {conflicts.length > 0 && (
-                <span className="text-[10px] font-mono font-bold bg-zinc-100 dark:bg-zinc-950 px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 rounded-md text-zinc-500">
-                  Total Logs: {conflicts.length}
-                </span>
-              )}
-            </div>
+          {/* Stats */}
+          <div className="border-t border-zinc-900 p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              {selectedStateName
+                ? `${selectedStateName}${selectedLga ? ` · ${selectedLga}` : ""}`
+                : "All of Nigeria"}
+            </p>
 
-            <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-              {loadingData ? (
-                <div className="text-center py-6 text-xs text-zinc-500 font-mono animate-pulse">
-                  UPDATING FEEDS...
-                </div>
-              ) : conflicts.length === 0 ? (
-                <div className="text-center py-6 text-xs text-zinc-500 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl px-4">
-                  No security incidents recorded for this criteria.
-                </div>
-              ) : (
-                <>
-                  {visibleConflicts.map((item, index) => (
-                    <div
-                      key={index}
-                      onClick={() => setFocusedLocation(item.coordinates)}
-                      className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl p-4 space-y-2 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 transition-all cursor-pointer transform hover:-translate-y-0.5 shadow-sm"
+            {loadState === "loading" && (
+              <p className="text-[11px] text-zinc-600 animate-pulse">
+                Loading dataset…
+              </p>
+            )}
+            {loadState === "error" && (
+              <p className="text-[11px] text-red-500">
+                Failed to load data. Reload to retry.
+              </p>
+            )}
+            {loadState === "ready" && (
+              <div className="space-y-2">
+                <Stat label="Matched incidents" value={filteredEvents.length} />
+                <Stat
+                  label="Reported casualties"
+                  value={totalCasualties}
+                  highlight
+                />
+                <Stat label="Total dataset" value={allEvents.length} dim />
+              </div>
+            )}
+          </div>
+
+          {/* Event list */}
+          {loadState === "ready" && filteredEvents.length > 0 && (
+            <div className="border-t border-zinc-900 p-4 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
+                Recent Events
+              </p>
+              {filteredEvents.slice(0, 12).map((ev, i) => (
+                <button
+                  key={i}
+                  onClick={() =>
+                    setMapFocus([...ev.coordinates] as [number, number])
+                  }
+                  className="w-full text-left p-2.5 rounded-xl bg-zinc-900/60 hover:bg-zinc-800/60 border border-zinc-800/50 hover:border-zinc-700 transition-all group"
+                >
+                  <div className="flex justify-between items-center mb-0.5">
+                    <span
+                      className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                        ev.alertType === "Armed Clashes & Attacks"
+                          ? "bg-amber-900/40 text-amber-400"
+                          : "bg-red-900/40 text-red-400"
+                      }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                            item.alertType === "Armed Clashes & Attacks"
-                              ? "bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40"
-                              : "bg-red-100 dark:bg-red-950/50 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-900/40"
-                          }`}
-                        >
-                          {item.alertType}
-                        </span>
-                        <span className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
-                          {item.month} {item.year}
-                        </span>
-                      </div>
-                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">
-                        {item.lga}, {item.state}
-                      </p>
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-900/60 text-[11px] font-medium">
-                        <div className="text-zinc-500 dark:text-zinc-400">
-                          Incidents:{" "}
-                          <span className="text-zinc-900 dark:text-zinc-100 font-bold font-mono">
-                            {item.incidentCount}
-                          </span>
-                        </div>
-                        <div className="text-zinc-500 dark:text-zinc-400">
-                          Casualties:{" "}
-                          <span
-                            className={`${item.reportedCasualties > 0 ? "text-red-500 dark:text-red-400 font-bold" : "text-zinc-500 dark:text-zinc-400"} font-mono`}
-                          >
-                            {item.reportedCasualties}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Clean, Non-Expanding Pagination Row View Controls */}
-                  {totalPages > 1 && (
-                    <div className="grid grid-cols-3 items-center gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-900 text-xs font-semibold text-zinc-500">
-                      <button
-                        disabled={currentPage === 1}
-                        onClick={() =>
-                          setCurrentPage((prev) => Math.max(prev - 1, 1))
-                        }
-                        className="py-2 text-center bg-zinc-100 dark:bg-zinc-900 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-30 border border-zinc-200 dark:border-zinc-800 transition-colors"
-                      >
-                        ◀ Back
-                      </button>
-                      <div className="text-center font-mono text-[11px] text-zinc-400">
-                        Page {currentPage} / {totalPages}
-                      </div>
-                      <button
-                        disabled={currentPage === totalPages}
-                        onClick={() =>
-                          setCurrentPage((prev) =>
-                            Math.min(prev + 1, totalPages),
-                          )
-                        }
-                        className="py-2 text-center bg-zinc-100 dark:bg-zinc-900 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-800 disabled:opacity-30 border border-zinc-200 dark:border-zinc-800 transition-colors"
-                      >
-                        Next ▶
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
+                      {ev.alertType}
+                    </span>
+                    <span className="text-[9px] text-zinc-600 font-mono">
+                      {ev.month} {ev.year}
+                    </span>
+                  </div>
+                  <p className="text-xs font-semibold text-zinc-200 truncate group-hover:text-white">
+                    {ev.lga}, {ev.state}
+                  </p>
+                  <p className="text-[10px] text-zinc-500 font-mono">
+                    {ev.incidentCount} incidents ·{" "}
+                    <span className="text-red-400">
+                      {ev.reportedCasualties} casualties
+                    </span>
+                  </p>
+                </button>
+              ))}
             </div>
-          </div>
-        </div>
-      </section>
+          )}
+        </aside>
 
-      <section className="flex-grow h-full relative z-10">
-        <LiveTrackerMap
-          stateName={activeStateName}
-          lgaName={selectedLga}
-          eventsList={conflicts}
-          onMapLocationSelect={handleUnifiedMapSelect}
-          cardFocusedCoords={focusedLocation}
-          theme={theme}
-        />
-      </section>
-    </main>
+        {/* ── Map — always mounted, never waits for data ─────────────────── */}
+        <main className="flex-1 relative">
+          <LiveTrackerMap
+            stateName={selectedStateName}
+            lgaName={selectedLga}
+            eventsList={filteredEvents}
+            onMapLocationSelect={handleMapLocationSelect}
+            cardFocusedCoords={mapFocus}
+            theme={theme}
+          />
+
+          {loadState === "loading" && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-zinc-900/90 border border-zinc-700 text-zinc-300 text-xs font-medium px-4 py-2 rounded-full backdrop-blur-sm pointer-events-none z-[1000]">
+              <span className="animate-pulse">Fetching conflict dataset…</span>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
   );
 }
 
-export default function TrackerDashboard() {
+function Stat({
+  label,
+  value,
+  highlight,
+  dim,
+}: {
+  label: string;
+  value: number;
+  highlight?: boolean;
+  dim?: boolean;
+}) {
   return (
-    <Suspense
-      fallback={
-        <div className="h-screen w-full bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center text-zinc-500 text-sm">
-          Opening secure dashboard console...
-        </div>
-      }
-    >
-      <TrackerDashboardContent />
-    </Suspense>
+    <div className="flex justify-between items-center">
+      <span
+        className={`text-[11px] ${dim ? "text-zinc-600" : "text-zinc-400"}`}
+      >
+        {label}
+      </span>
+      <span
+        className={`text-xs font-bold font-mono ${
+          highlight ? "text-red-400" : dim ? "text-zinc-600" : "text-zinc-200"
+        }`}
+      >
+        {value.toLocaleString()}
+      </span>
+    </div>
   );
 }

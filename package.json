@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "npx ts-node --project tsconfig.scripts.json scripts/build-conflict-data.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -29,6 +30,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }
