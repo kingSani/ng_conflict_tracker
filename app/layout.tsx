@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSuspenseInfra } from "react";
+import { useState } from "react";
 import { Inter } from "next/font/google";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
