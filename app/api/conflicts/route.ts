@@ -9,7 +9,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-
+export const dynamic = "force-dynamic";
 interface ConflictRow {
   state: string;
   lga: string;
@@ -21,7 +21,12 @@ interface ConflictRow {
   coordinates: [number, number];
 }
 
-const DATA_FILE = path.join(process.cwd(), "public", "data", "conflict-data.json");
+const DATA_FILE = path.join(
+  process.cwd(),
+  "public",
+  "data",
+  "conflict-data.json",
+);
 
 // Module-level cache — survives across requests in the same worker process.
 // The file only changes on redeploy so this is always safe.
@@ -32,7 +37,7 @@ function getAllData(): ConflictRow[] {
 
   if (!fs.existsSync(DATA_FILE)) {
     throw new Error(
-      "conflict-data.json not found. Run `npm run build` (or the prebuild script) first."
+      "conflict-data.json not found. Run `npm run build` (or the prebuild script) first.",
     );
   }
 
@@ -41,9 +46,18 @@ function getAllData(): ConflictRow[] {
 }
 
 const MONTH_ORDER: Record<string, number> = {
-  January: 1, February: 2, March: 3, April: 4,
-  May: 5, June: 6, July: 7, August: 8,
-  September: 9, October: 10, November: 11, December: 12,
+  January: 1,
+  February: 2,
+  March: 3,
+  April: 4,
+  May: 5,
+  June: 6,
+  July: 7,
+  August: 8,
+  September: 9,
+  October: 10,
+  November: 11,
+  December: 12,
 };
 
 export async function GET(request: Request) {
@@ -67,7 +81,7 @@ export async function GET(request: Request) {
     console.error("[conflicts API]", err);
     return NextResponse.json(
       { error: "Failed to load conflict data" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
