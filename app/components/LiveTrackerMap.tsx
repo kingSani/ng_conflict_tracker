@@ -36,10 +36,37 @@ interface LiveTrackerMapProps {
 }
 
 const NIGERIA_CENTER: [number, number] = [9.082, 8.6753];
-const NIGERIA_BOUNDS = L.latLngBounds(
-  L.latLng(4.0, 2.5),
-  L.latLng(14.0, 15.0)
-);
+const NIGERIA_BOUNDS = L.latLngBounds(L.latLng(4.0, 2.5), L.latLng(14.0, 15.0));
+
+// ─── Selected-location icon ───────────────────────────────────────────────────
+// Distinct from the emerald incident-cluster pins so a clicked / geolocated
+// point is unmistakably visible on the map. Previously nothing was rendered
+// here at all, so "use your location" / map clicks produced no visible marker
+// even when the coordinates were correctly captured.
+
+const selectedLocationIcon = L.divIcon({
+  html: `
+    <div style="position:relative;width:34px;height:34px;">
+      <span style="position:absolute;inset:0;border-radius:9999px;background:#3b82f6;opacity:0.25;
+                   animation:tracker-pulse 1.6s ease-out infinite;"></span>
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none"
+           xmlns="http://www.w3.org/2000/svg"
+           style="position:relative;filter:drop-shadow(0px 2px 3px rgba(0,0,0,0.4));">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"
+              fill="#3b82f6" stroke="#1d4ed8" stroke-width="1.5"/>
+        <circle cx="12" cy="9" r="3.2" fill="#fff"/>
+      </svg>
+    </div>
+    <style>
+      @keyframes tracker-pulse {
+        0% { transform: scale(0.4); opacity: 0.45; }
+        100% { transform: scale(1.4); opacity: 0; }
+      }
+    </style>`,
+  className: "custom-leaflet-selected-location",
+  iconSize: L.point(34, 34),
+  iconAnchor: L.point(17, 34),
+});
 
 // ─── MapRecenterController ────────────────────────────────────────────────────
 // FIX: lastCenter initialised to null so the very first center change always
@@ -157,7 +184,15 @@ export default function LiveTrackerMap({
           background: theme === "dark" ? "#0c0c0e" : "#e5e7eb",
         }}
       >
+        {/*
+          key={theme} forces react-leaflet to unmount/remount this layer when
+          the theme flips. Relying on the `url` prop alone doesn't reliably
+          repaint the tile layer in place — this is the same remount trick
+          already used below for MarkerClusterGroup, just missing here, which
+          is why toggling the theme button never actually changed the tiles.
+        */}
         <TileLayer
+          key={`tiles-${theme}`}
           attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={
             theme === "dark"
@@ -173,6 +208,27 @@ export default function LiveTrackerMap({
           zoom={zoomLevel}
           cardFocusedCoords={cardFocusedCoords}
         />
+
+        {/* Marker for a clicked point or "Use Your Location" result. Previously
+            nothing rendered here at all, so even when the coordinate was
+            captured correctly there was no visible confirmation on the map. */}
+        {cardFocusedCoords && (
+          <Marker
+            position={cardFocusedCoords}
+            icon={selectedLocationIcon}
+            zIndexOffset={1000}
+          >
+            <Popup>
+              <div className="p-1 font-sans text-zinc-900 text-xs space-y-0.5 min-w-[140px]">
+                <p className="font-bold">Selected location</p>
+                <p className="font-mono text-[10px] text-zinc-500">
+                  {cardFocusedCoords[0].toFixed(4)},{" "}
+                  {cardFocusedCoords[1].toFixed(4)}
+                </p>
+              </div>
+            </Popup>
+          </Marker>
+        )}
 
         {/* key forces cluster layer remount on theme change */}
         <MarkerClusterGroup
