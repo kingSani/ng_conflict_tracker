@@ -152,7 +152,14 @@ export default function TrackerPage() {
 
       return true;
     });
-  }, [allEvents, selectedStateCode, selectedLga, selectedYear, selectedMonth, statesList]);
+  }, [
+    allEvents,
+    selectedStateCode,
+    selectedLga,
+    selectedYear,
+    selectedMonth,
+    statesList,
+  ]);
 
   // ── Map focus ─────────────────────────────────────────────────────────────
   const [mapFocus, setMapFocus] = useState<[number, number] | null>(null);
@@ -207,20 +214,48 @@ export default function TrackerPage() {
         const result = await reverseGeocode(lat, lng);
         if (!result) return;
 
-        const matchedState = statesList.find((s) =>
-          s.name
-            .replace(/\s*State$/i, "")
+        // Bidirectional, normalised matching. The previous version only
+        // checked `shortStateName.includes(result.state)`, which fails
+        // whenever Mapbox returns the fuller form (e.g. "Rivers State")
+        // since the short trimmed name can never contain the longer string
+        // — that one-way check is why State/LGA silently never updated.
+        const normalize = (s: string | undefined | null) =>
+          (s ?? "")
             .toLowerCase()
-            .includes(result.state.toLowerCase()),
-        );
+            .replace(/\s*state$/i, "")
+            .replace(/[-\s]/g, "")
+            .replace(/ss/g, "s")
+            .trim();
+
+        const resultState = normalize(result.state);
+        const matchedState = resultState
+          ? statesList.find((s) => {
+              const target = normalize(s.name);
+              return (
+                target.includes(resultState) || resultState.includes(target)
+              );
+            })
+          : undefined;
 
         if (matchedState) {
           setSelectedStateCode(matchedState.isoCode);
-          const lgas = City.getCitiesOfState("NG", matchedState.isoCode);
-          const matchedLga = lgas.find((c) =>
-            c.name.toLowerCase().includes(result.lga.toLowerCase()),
+
+          const resultLga = normalize(result.lga);
+          if (resultLga) {
+            const lgas = City.getCitiesOfState("NG", matchedState.isoCode);
+            const matchedLga = lgas.find((c) => {
+              const target = normalize(c.name);
+              return target.includes(resultLga) || resultLga.includes(target);
+            });
+            setSelectedLga(matchedLga?.name ?? "");
+          } else {
+            setSelectedLga("");
+          }
+        } else {
+          console.warn(
+            "Reverse geocode returned a state that didn't match any Nigerian state:",
+            result.state,
           );
-          setSelectedLga(matchedLga?.name ?? "");
         }
       } catch (err) {
         console.error("Reverse geocode failed:", err);
@@ -297,9 +332,7 @@ export default function TrackerPage() {
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <header
         className={`flex-none flex items-center justify-between px-4 py-2.5 border-b z-10 ${
-          isDark
-            ? "bg-zinc-950 border-zinc-900"
-            : "bg-white border-zinc-200"
+          isDark ? "bg-zinc-950 border-zinc-900" : "bg-white border-zinc-200"
         }`}
       >
         <div className="flex items-center gap-3">
@@ -329,9 +362,7 @@ export default function TrackerPage() {
         {/* ── Sidebar ───────────────────────────────────────────────────── */}
         <aside
           className={`w-72 flex-none flex flex-col overflow-y-auto border-r ${
-            isDark
-              ? "bg-zinc-950 border-zinc-900"
-              : "bg-white border-zinc-200"
+            isDark ? "bg-zinc-950 border-zinc-900" : "bg-white border-zinc-200"
           }`}
         >
           <div className="p-4 space-y-4">

@@ -196,10 +196,8 @@ export default function LiveTrackerMap({
           attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
           url={
             theme === "dark"
-              ? "https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png?key=" +
-                process.env.CARTO_KEY
-              : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=" +
-                process.env.CARTO_KEY
+              ? `https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png?key=${process.env.NEXT_PUBLIC_CARTO_KEY}`
+              : `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${process.env.NEXT_PUBLIC_CARTO_KEY}`
           }
         />
 
