@@ -289,7 +289,7 @@ export default function LiveTrackerMap({
                       {incident.eventDate || `${incident.month} ${incident.year}`}
                     </p>
                     {incident.eventId && <p className="text-[9px] font-mono text-zinc-500">ACLED ID: {incident.eventId}</p>}
-                    {incident.description && <p className="max-w-[280px] whitespace-normal text-[10px] leading-4 text-zinc-700">{incident.description}</p>}
+                    {incident.description && <div><p className="text-[9px] font-bold uppercase tracking-wide text-zinc-500">ACLED notes</p><p className="max-w-[280px] whitespace-normal text-[10px] leading-4 text-zinc-700">{incident.description}</p></div>}
                     <div className="text-[11px] font-mono border-t pt-1 mt-1 flex gap-3">
                       <span>
                         Incidents: <strong>{incident.incidentCount}</strong>

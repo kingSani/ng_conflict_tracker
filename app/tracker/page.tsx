@@ -665,6 +665,20 @@ export default function TrackerPage() {
             )}
           </div>
 
+          {loadState === "ready" && filteredEvents.length > 0 && (
+            <section className={`border-t p-4 space-y-2 ${isDark ? "border-zinc-900" : "border-zinc-200"}`}>
+              <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>ACLED narrative notes</p>
+              {filteredEvents.filter((ev) => ev.description).slice(0, 4).map((ev, i) => (
+                <button key={ev.eventId || i} type="button" onClick={() => { setSelectedConflict(ev); setMapFocus([...ev.coordinates] as [number, number]); }} className={`w-full rounded-xl border p-3 text-left ${isDark ? "bg-zinc-900/60 border-zinc-800 hover:bg-zinc-800" : "bg-white border-zinc-200 hover:bg-zinc-100"}`}>
+                  <span className={`text-[10px] font-semibold ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{ev.eventDate} · {ev.subEventType || ev.eventType}</span>
+                  <p className={`mt-1 text-xs leading-5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{ev.description}</p>
+                  <p className="mt-1 text-[10px] text-zinc-500">{ev.lga}, {ev.state}</p>
+                </button>
+              ))}
+              {!filteredEvents.some((ev) => ev.description) && <p className="text-xs leading-5 text-zinc-500">Narrative notes are not included in the monthly summary data. The supplied ACLED event file ends on 17 October 2025.</p>}
+            </section>
+          )}
+
           {/* Event list */}
           {loadState === "ready" && filteredEvents.length === 0 && (
             <div className={`border-t p-4 text-xs ${isDark ? "border-zinc-900 text-zinc-500" : "border-zinc-200 text-zinc-500"}`}>No incidents in this map view for the selected filters.</div>
@@ -767,7 +781,10 @@ export default function TrackerPage() {
                 <div><dt className="text-zinc-500">Reported fatalities</dt><dd className="mt-0.5 font-semibold text-red-500">{selectedConflict.reportedCasualties.toLocaleString()}</dd></div>
                 {selectedConflict.eventId && <div className="col-span-2"><dt className="text-zinc-500">ACLED event ID</dt><dd className="mt-0.5 font-mono">{selectedConflict.eventId}</dd></div>}
               </dl>
-              {selectedConflict.description && <p className={`mt-3 border-t pt-3 text-xs leading-5 ${isDark ? "border-zinc-800 text-zinc-300" : "border-zinc-200 text-zinc-700"}`}>{selectedConflict.description}</p>}
+              <div className={`mt-3 border-t pt-3 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>ACLED notes</p>
+                <p className={`mt-1 text-xs leading-5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{selectedConflict.description || "Narrative notes are not included in the monthly summary data. The supplied ACLED event file ends on 17 October 2025."}</p>
+              </div>
             </section>
           )}
 
