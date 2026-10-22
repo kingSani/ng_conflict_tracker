@@ -40,6 +40,11 @@ interface ConflictRow {
   incidentCount: number;
   reportedCasualties: number;
   alertType: string;
+  eventType?: string;
+  subEventType?: string;
+  eventDate?: string;
+  eventId?: string;
+  description?: string;
   coordinates: [number, number];
 }
 
@@ -126,6 +131,55 @@ function processCsv(
   return results;
 }
 
+
+function processAcledCsv(filePath: string): ConflictRow[] {
+  if (!fs.existsSync(filePath)) {
+    console.warn(`[build] Missing: ${filePath}`);
+    return [];
+  }
+
+  const rows = parse(fs.readFileSync(filePath, "utf-8"), {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+  }) as Record<string, string>[];
+  const results: ConflictRow[] = [];
+
+  for (const row of rows) {
+    const state = (row.admin1 || "").trim();
+    const lga = (row.admin2 || "").trim();
+    const eventType = (row.event_type || "").trim();
+    const subEventType = (row.sub_event_type || "").trim();
+    const eventDate = (row.event_date || "").trim();
+    const year = parseInt(row.year || eventDate.slice(0, 4) || "0", 10);
+    const latitude = parseFloat(row.latitude || "");
+    const longitude = parseFloat(row.longitude || "");
+    if (!state || !lga || !eventType || year < 2021 || !isFinite(latitude) || !isFinite(longitude)) continue;
+
+    const date = new Date(`${eventDate}T00:00:00Z`);
+    if (!isFinite(date.getTime())) continue;
+    const month = Object.keys(MONTH_ORDER)[date.getUTCMonth()];
+
+    results.push({
+      state,
+      lga,
+      month,
+      year,
+      incidentCount: 1,
+      reportedCasualties: parseInt(row.fatalities || "0", 10) || 0,
+      alertType: eventType,
+      eventType,
+      subEventType,
+      eventDate,
+      eventId: row.event_id_cnty,
+      description: (row.event_description || "").trim(),
+      coordinates: [latitude, longitude],
+    });
+  }
+
+  return results;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -150,6 +204,7 @@ async function main() {
       "Armed Clashes & Attacks",
       geoData
     ),
+    ...processAcledCsv(path.join(DATA_DIR, "acled_events.csv")),
   ];
 
   // 3. Sort: most recent first

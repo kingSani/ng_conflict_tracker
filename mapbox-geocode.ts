@@ -40,6 +40,7 @@ interface MbFeature {
   place_name: string;
   context?: MbContext[];
   text: string;
+  center?: [number, number];
 }
 
 interface MbResponse {
@@ -146,7 +147,7 @@ export async function forwardGeocode(
     if (!data.features || data.features.length === 0) return null;
 
     // Mapbox returns [longitude, latitude]
-    const coords = (data.features[0] as any).center as [number, number];
+    const coords = data.features[0].center;
     return coords ?? null;
   } catch (err) {
     console.error("[mapbox-geocode] forwardGeocode error:", err);

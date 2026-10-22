@@ -15,8 +15,9 @@
  */
 
 import dynamic from "next/dynamic";
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState, useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { getServerThemeSnapshot, getThemeSnapshot, setThemePreference, subscribeTheme } from "../lib/theme";
+import { useRouter, useSearchParams } from "next/navigation";
 import { State, City } from "country-state-city";
 import { reverseGeocode } from "../../mapbox-geocode";
 
@@ -41,6 +42,11 @@ interface ConflictEvent {
   incidentCount: number;
   reportedCasualties: number;
   alertType: string;
+  eventType?: string;
+  subEventType?: string;
+  eventDate?: string;
+  eventId?: string;
+  description?: string;
   coordinates: [number, number];
 }
 
@@ -65,6 +71,7 @@ const MONTH_ORDER = [
 
 export default function TrackerPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const statesList = useMemo(() => State.getStatesOfCountry("NG"), []);
@@ -81,6 +88,14 @@ export default function TrackerPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>(
     searchParams.get("month") || "",
   );
+  const [selectedCategory, setSelectedCategory] = useState<string>(
+    searchParams.get("category") || "__acled_all__",
+  );
+  const [selectedSubEventType, setSelectedSubEventType] = useState(
+    searchParams.get("subEventType") || "",
+  );
+  const [visibleMapBounds, setVisibleMapBounds] = useState<[number, number, number, number] | null>(null);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   const lgasList = useMemo(() => {
     if (!selectedStateCode) return [];
@@ -97,7 +112,7 @@ export default function TrackerPage() {
     hasFetched.current = true;
     setLoadState("loading");
 
-    fetch("/api/conflicts")
+    fetch("/api/conflicts?startYear=2021")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -120,11 +135,21 @@ export default function TrackerPage() {
     return MONTH_ORDER.filter((m) => months.has(m));
   }, [allEvents]);
 
+  const categoriesList = useMemo(() => {
+    return Array.from(new Set(allEvents.map((ev) => ev.eventType || ev.alertType)))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [allEvents]);
+
+  const subEventTypesList = useMemo(() => Array.from(new Set(allEvents.map((ev) => ev.subEventType).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b)), [allEvents]);
+
   // ── Client-side filtering ─────────────────────────────────────────────────
-  const filteredEvents = useMemo(() => {
+  const controlFilteredEvents = useMemo(() => {
     if (!allEvents.length) return [];
 
     return allEvents.filter((ev) => {
+      if (selectedCategory !== "__acled_all__" && (ev.eventType || ev.alertType) !== selectedCategory) return false;
+      if (selectedSubEventType && ev.subEventType !== selectedSubEventType) return false;
       if (selectedStateCode) {
         const stateObj = statesList.find(
           (s) => s.isoCode === selectedStateCode,
@@ -158,45 +183,22 @@ export default function TrackerPage() {
     selectedLga,
     selectedYear,
     selectedMonth,
+    selectedCategory,
+    selectedSubEventType,
     statesList,
   ]);
 
+  const filteredEvents = useMemo(() => {
+    return controlFilteredEvents.filter((ev) => {
+      if (!visibleMapBounds) return true;
+      const [south, west, north, east] = visibleMapBounds;
+      const [latitude, longitude] = ev.coordinates;
+      return latitude >= south && latitude <= north && longitude >= west && longitude <= east;
+    });
+  }, [controlFilteredEvents, visibleMapBounds]);
+
   // ── Map focus ─────────────────────────────────────────────────────────────
   const [mapFocus, setMapFocus] = useState<[number, number] | null>(null);
-
-  // Guards against the dropdown-sync effects below stomping on a focus point
-  // that was just set explicitly by a map click or "Use Your Location". Set
-  // to true right before we know a state/LGA change is about to be caused by
-  // reverse-geocoding rather than the user picking a dropdown directly.
-  const suppressAutoFocusRef = useRef(false);
-
-  // State dropdown → fly to first matching event
-  useEffect(() => {
-    if (suppressAutoFocusRef.current) return;
-    if (!selectedStateCode) {
-      setMapFocus(null);
-      return;
-    }
-    const stateObj = statesList.find((s) => s.isoCode === selectedStateCode);
-    if (!stateObj) return;
-    const target = stateObj.name.replace(/\s*State$/i, "").toLowerCase();
-    const match = allEvents.find((ev) =>
-      ev.state.toLowerCase().includes(target),
-    );
-    if (match) setMapFocus([...match.coordinates] as [number, number]);
-  }, [selectedStateCode, allEvents, statesList]);
-
-  // LGA dropdown → narrow focus
-  useEffect(() => {
-    if (suppressAutoFocusRef.current) return;
-    if (!selectedLga) return;
-    const norm = (s: string) =>
-      s.toLowerCase().replace(/[-\s]/g, "").replace(/ss/g, "s");
-    const match = allEvents.find((ev) =>
-      norm(ev.lga).includes(norm(selectedLga)),
-    );
-    if (match) setMapFocus([...match.coordinates] as [number, number]);
-  }, [selectedLga, allEvents]);
 
   // ── Reverse geocode → update dropdowns ───────────────────────────────────
   const [geoLoading, setGeoLoading] = useState(false);
@@ -206,7 +208,6 @@ export default function TrackerPage() {
       // Show the point immediately — this is the actual coordinate the user
       // clicked or was located at, and it must win regardless of whether the
       // geocode lookup below succeeds, fails, or matches a dropdown entry.
-      suppressAutoFocusRef.current = true;
       setMapFocus([lat, lng]);
 
       try {
@@ -259,13 +260,6 @@ export default function TrackerPage() {
         }
       } catch (err) {
         console.error("Reverse geocode failed:", err);
-      } finally {
-        // Release the guard after this commit + the dropdown-sync effects
-        // it triggers have both had a chance to run, so they don't fly the
-        // map away from the point we just set above.
-        setTimeout(() => {
-          suppressAutoFocusRef.current = false;
-        }, 0);
       }
     },
     [statesList],
@@ -297,8 +291,16 @@ export default function TrackerPage() {
   }, [applyReverseGeocode]);
 
   // ── Theme ─────────────────────────────────────────────────────────────────
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
   const isDark = theme === "dark";
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setThemePreference(nextTheme);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("theme", nextTheme);
+    router.replace(`/tracker?${params.toString()}`);
+  };
 
   // ── Derived display values ────────────────────────────────────────────────
   const selectedStateName =
@@ -312,13 +314,16 @@ export default function TrackerPage() {
   );
 
   const hasActiveFilters =
-    selectedStateCode || selectedLga || selectedYear || selectedMonth;
+    selectedCategory !== "__acled_all__" || selectedSubEventType || selectedStateCode || selectedLga || selectedYear || selectedMonth;
 
   const clearAllFilters = () => {
     setSelectedStateCode("");
     setSelectedLga("");
     setSelectedYear("");
     setSelectedMonth("");
+    setSelectedCategory("__acled_all__");
+    setSelectedSubEventType("");
+    setVisibleMapBounds(null);
     setMapFocus(null);
   };
 
@@ -336,7 +341,6 @@ export default function TrackerPage() {
         }`}
       >
         <div className="flex items-center gap-3">
-          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
           <span
             className={`text-xs font-bold tracking-wide ${
               isDark ? "text-zinc-100" : "text-zinc-900"
@@ -345,8 +349,17 @@ export default function TrackerPage() {
             NigeriaWatch · Live Tracker
           </span>
         </div>
+        <div className="flex items-center gap-2">
         <button
-          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+          type="button"
+          className="md:hidden text-[10px] font-medium px-2.5 py-1 rounded-lg border border-emerald-700 text-emerald-700 dark:text-emerald-300 dark:border-emerald-800"
+          aria-expanded={isMobileSidebarOpen}
+          onClick={() => setIsMobileSidebarOpen((open) => !open)}
+        >
+          {isMobileSidebarOpen ? "Hide filters" : "Filters"}
+        </button>
+        <button
+          onClick={toggleTheme}
           className={`text-[10px] font-medium px-2.5 py-1 rounded-lg border transition-colors ${
             isDark
               ? "text-zinc-400 hover:text-zinc-200 bg-zinc-900 border-zinc-800"
@@ -355,13 +368,14 @@ export default function TrackerPage() {
         >
           {isDark ? "☀ Light" : "◑ Dark"}
         </button>
+        </div>
       </header>
 
       {/* ── Body ─────────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
         {/* ── Sidebar ───────────────────────────────────────────────────── */}
         <aside
-          className={`w-72 flex-none flex flex-col overflow-y-auto border-r ${
+          className={`${isMobileSidebarOpen ? "flex max-h-[45%] md:max-h-none" : "hidden md:flex"} w-full md:w-72 md:flex-none flex-col overflow-y-auto border-b md:border-b-0 md:border-r ${
             isDark ? "bg-zinc-950 border-zinc-900" : "bg-white border-zinc-200"
           }`}
         >
@@ -429,6 +443,7 @@ export default function TrackerPage() {
                   onChange={(e) => {
                     setSelectedStateCode(e.target.value);
                     setSelectedLga("");
+                    setMapFocus(null);
                   }}
                   className={`w-full border rounded-xl px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer appearance-none focus:outline-none focus:border-emerald-600 ${
                     isDark
@@ -466,7 +481,7 @@ export default function TrackerPage() {
                 <select
                   value={selectedLga}
                   disabled={!selectedStateCode}
-                  onChange={(e) => setSelectedLga(e.target.value)}
+                  onChange={(e) => { setSelectedLga(e.target.value); setMapFocus(null); }}
                   className={`w-full border rounded-xl px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer appearance-none disabled:opacity-30 disabled:cursor-not-allowed focus:outline-none focus:border-emerald-600 ${
                     isDark
                       ? "bg-zinc-900 border-zinc-800 text-zinc-200"
@@ -488,6 +503,26 @@ export default function TrackerPage() {
                   ▼
                 </span>
               </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className={`text-[11px] font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Conflict category</label>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className={`w-full border rounded-xl px-3 py-2.5 text-xs font-medium appearance-none focus:outline-none focus:border-emerald-600 ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-200" : "bg-white border-zinc-300 text-zinc-800"}`}
+              >
+                <option value="__acled_all__">All conflict records</option>
+                {categoriesList.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={`text-[11px] font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>ACLED event subtype</label>
+              <select value={selectedSubEventType} onChange={(e) => setSelectedSubEventType(e.target.value)} className={`w-full border rounded-xl px-3 py-2.5 text-xs font-medium appearance-none focus:outline-none focus:border-emerald-600 ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-200" : "bg-white border-zinc-300 text-zinc-800"}`}>
+                <option value="">All event subtypes</option>
+                {subEventTypesList.map((subtype) => <option key={subtype} value={subtype}>{subtype}</option>)}
+              </select>
             </div>
 
             {/* Date filter: Year + Month */}
@@ -609,8 +644,8 @@ export default function TrackerPage() {
             {loadState === "ready" && (
               <div className="space-y-2">
                 <Stat
-                  label="Matched incidents"
-                  value={filteredEvents.length}
+                  label="Incidents in map view"
+                  value={filteredEvents.reduce((sum, ev) => sum + ev.incidentCount, 0)}
                   isDark={isDark}
                 />
                 <Stat
@@ -630,6 +665,9 @@ export default function TrackerPage() {
           </div>
 
           {/* Event list */}
+          {loadState === "ready" && filteredEvents.length === 0 && (
+            <div className={`border-t p-4 text-xs ${isDark ? "border-zinc-900 text-zinc-500" : "border-zinc-200 text-zinc-500"}`}>No incidents in this map view for the selected filters.</div>
+          )}
           {loadState === "ready" && filteredEvents.length > 0 && (
             <div
               className={`border-t p-4 space-y-2 ${
@@ -663,7 +701,7 @@ export default function TrackerPage() {
                             : "bg-red-100 text-red-800"
                       }`}
                     >
-                      {ev.alertType}
+                      {ev.eventType || ev.alertType}
                     </span>
                     <span
                       className={`text-[9px] font-mono ${
@@ -682,16 +720,14 @@ export default function TrackerPage() {
                   >
                     {ev.lga}, {ev.state}
                   </p>
-                  <p
-                    className={`text-[10px] font-mono ${
-                      isDark ? "text-zinc-500" : "text-zinc-500"
-                    }`}
-                  >
-                    {ev.incidentCount} incidents ·{" "}
-                    <span className={isDark ? "text-red-400" : "text-red-600"}>
-                      {ev.reportedCasualties} casualties
-                    </span>
-                  </p>
+                  {ev.subEventType && <p className={`text-[10px] font-semibold ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{ev.subEventType}</p>}
+                {ev.description && <p className={`text-[10px] leading-4 line-clamp-3 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{ev.description}</p>}
+                <p className={`text-[10px] font-mono ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                  {ev.incidentCount} {ev.incidentCount === 1 ? "incident" : "incidents"} ·{" "}
+                  <span className={isDark ? "text-red-400" : "text-red-600"}>
+                    {ev.reportedCasualties} casualties
+                  </span>
+                </p>
                 </button>
               ))}
             </div>
@@ -699,11 +735,12 @@ export default function TrackerPage() {
         </aside>
 
         {/* ── Map — always mounted, never waits for data ─────────────────── */}
-        <main className="flex-1 relative">
+        <main className="flex-1 min-h-0 relative">
           <LiveTrackerMap
             stateName={selectedStateName}
             lgaName={selectedLga}
-            eventsList={filteredEvents}
+            eventsList={controlFilteredEvents}
+            onVisibleBoundsChange={setVisibleMapBounds}
             onMapLocationSelect={handleMapLocationSelect}
             cardFocusedCoords={mapFocus}
             theme={theme}

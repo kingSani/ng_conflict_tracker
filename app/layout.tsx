@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { getServerThemeSnapshot, getThemeSnapshot, setThemePreference, subscribeTheme } from "./lib/theme";
 import { Inter } from "next/font/google";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import "./globals.css";
 
@@ -13,12 +14,13 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-
-  // Unified global URL query theme controller state
-  const theme = searchParams.get("theme") === "light" ? "light" : "dark";
+  const pathname = usePathname();
+  const isTrackerPage = pathname === "/tracker";
+  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);\n\n  useEffect(() => { document.title = "NG Conflict Tracker"; }, []);
 
   const toggleTheme = () => {
     const nextTheme = theme === "light" ? "dark" : "light";
+    setThemePreference(nextTheme);
     const params = new URLSearchParams(searchParams.toString());
     params.set("theme", nextTheme);
     router.replace(`?${params.toString()}`);
@@ -32,15 +34,14 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
       <body
         className={`${inter.className} min-h-screen flex flex-col justify-between antialiased bg-zinc-50 dark:bg-zinc-950 transition-colors`}
       >
-        <header className="fixed top-0 left-0 right-0 z-[500] bg-white/70 dark:bg-zinc-950/70 border-b border-zinc-200 dark:border-zinc-900 backdrop-blur-md transition-all duration-300">
+        <header className={`fixed top-0 left-0 right-0 z-[500] bg-white/70 dark:bg-zinc-950/70 border-b border-zinc-200 dark:border-zinc-900 backdrop-blur-md transition-all duration-300 ${isTrackerPage ? "hidden" : ""}`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <Link
                 href="/"
                 className="font-bold tracking-tight text-lg uppercase bg-gradient-to-r from-zinc-900 dark:from-white to-zinc-500 dark:to-zinc-400 bg-clip-text text-transparent"
               >
-                Conflict<span className="text-emerald-500">Tracker</span>
+                NG Conflict<span className="text-emerald-500">Tracker</span>
               </Link>
             </div>
 
@@ -51,12 +52,12 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
               >
                 Map
               </Link>
-              <a
-                href="#about"
+              <Link
+                href="/about"
                 className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
               >
                 About Us
-              </a>
+              </Link>
               <a
                 href="#support"
                 className="hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
@@ -121,6 +122,7 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
           {isMobileMenuOpen && (
             <div className="md:hidden bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-900 shadow-xl transition-all duration-200">
               <div className="px-4 pt-3 pb-6 space-y-3 font-medium text-sm">
+                <Link href="/about" onClick={() => setIsMobileMenuOpen(false)} className="block px-3 py-2.5 rounded-xl text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900">About Us</Link>
                 <Link
                   href="/tracker"
                   onClick={() => setIsMobileMenuOpen(false)}
@@ -149,10 +151,10 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
 
         <div className="flex-grow">{children}</div>
 
-        <footer className="bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-900 py-6 text-xs text-zinc-500 font-mono transition-colors">
+        <footer className={`bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-900 py-6 text-xs text-zinc-500 font-mono transition-colors ${isTrackerPage ? "hidden" : ""}`}>
           <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-center sm:text-left">
-              &copy; {new Date().getFullYear()} Conflict Tracker Nigeria. All
+              &copy; {new Date().getFullYear()} NG Conflict Tracker. All
               assets verified.
             </div>
             <div className="flex gap-6 justify-center">

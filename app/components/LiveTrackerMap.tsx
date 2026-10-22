@@ -23,6 +23,10 @@ interface IncidentMarker {
   incidentCount: number;
   reportedCasualties: number;
   alertType: string;
+  eventType?: string;
+  subEventType?: string;
+  eventDate?: string;
+  description?: string;
   coordinates: [number, number];
 }
 
@@ -31,6 +35,7 @@ interface LiveTrackerMapProps {
   lgaName: string;
   eventsList: IncidentMarker[];
   onMapLocationSelect?: (lat: number, lng: number) => void;
+  onVisibleBoundsChange?: (bounds: [number, number, number, number]) => void;
   cardFocusedCoords: [number, number] | null;
   theme: "light" | "dark";
 }
@@ -113,6 +118,22 @@ function MapRecenterController({
 
 // ─── MapClickHandler ──────────────────────────────────────────────────────────
 
+function MapBoundsReporter({ onBoundsChange }: { onBoundsChange?: (bounds: [number, number, number, number]) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!onBoundsChange) return;
+    const report = () => {
+      const bounds = map.getBounds();
+      onBoundsChange([bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()]);
+    };
+    report();
+    map.on("moveend", report);
+    map.on("zoomend", report);
+    return () => { map.off("moveend", report); map.off("zoomend", report); };
+  }, [map, onBoundsChange]);
+  return null;
+}
+
 function MapClickHandler({
   onLocationSelect,
 }: {
@@ -128,7 +149,7 @@ function MapClickHandler({
 
 // ─── Cluster icon ─────────────────────────────────────────────────────────────
 
-function buildClusterIcon(cluster: any) {
+function buildClusterIcon(cluster: { getChildCount: () => number }) {
   const count = cluster.getChildCount();
   return L.divIcon({
     html: `
@@ -157,6 +178,7 @@ export default function LiveTrackerMap({
   lgaName,
   eventsList,
   onMapLocationSelect,
+  onVisibleBoundsChange,
   cardFocusedCoords,
   theme,
 }: LiveTrackerMapProps) {
@@ -201,6 +223,7 @@ export default function LiveTrackerMap({
           }
         />
 
+        <MapBoundsReporter onBoundsChange={onVisibleBoundsChange} />
         <MapClickHandler onLocationSelect={onMapLocationSelect} />
 
         <MapRecenterController
@@ -250,19 +273,21 @@ export default function LiveTrackerMap({
                   <div className="p-1 font-sans text-zinc-900 space-y-1 min-w-[180px]">
                     <span
                       className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
-                        incident.alertType === "Armed Clashes & Attacks"
+                        (incident.eventType || incident.alertType) === "Battles" || incident.alertType === "Armed Clashes & Attacks"
                           ? "bg-amber-100 text-amber-800"
                           : "bg-red-100 text-red-800"
                       }`}
                     >
-                      {incident.alertType}
+                      {incident.eventType || incident.alertType}
                     </span>
                     <p className="font-bold text-xs pt-1">
                       {incident.lga}, {incident.state}
                     </p>
+                    {incident.subEventType && <p className="text-[10px] font-semibold text-zinc-700">{incident.subEventType}</p>}
                     <p className="text-[10px] text-zinc-500 font-medium">
-                      {incident.month} {incident.year}
+                      {incident.eventDate || `${incident.month} ${incident.year}`}
                     </p>
+                    {incident.description && <p className="max-w-[280px] whitespace-normal text-[10px] leading-4 text-zinc-700">{incident.description}</p>}
                     <div className="text-[11px] font-mono border-t pt-1 mt-1 flex gap-3">
                       <span>
                         Incidents: <strong>{incident.incidentCount}</strong>

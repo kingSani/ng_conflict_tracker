@@ -18,6 +18,11 @@ interface ConflictRow {
   incidentCount: number;
   reportedCasualties: number;
   alertType: string;
+  eventType?: string;
+  subEventType?: string;
+  eventDate?: string;
+  eventId?: string;
+  description?: string;
   coordinates: [number, number];
 }
 
@@ -63,7 +68,7 @@ const MONTH_ORDER: Record<string, number> = {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const startYear = parseInt(searchParams.get("startYear") || "2025", 10);
+    const startYear = parseInt(searchParams.get("startYear") || "2021", 10);
 
     const all = getAllData();
 
