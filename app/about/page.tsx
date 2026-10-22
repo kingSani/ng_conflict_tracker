@@ -23,11 +23,11 @@ export default function About() {
           </div>
 
           <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-7 sm:p-9">
-            <div className="aspect-[4/5] max-h-[420px] overflow-hidden rounded-2xl bg-zinc-100 dark:bg-zinc-800">
-              <img src="/images/developer-photo.jpg" alt="Portrait of the project developer" className="h-full w-full object-cover object-center" />
+            <div className="aspect-[4/3] max-h-[360px] overflow-hidden rounded-2xl bg-zinc-100 dark:bg-zinc-800">
+              <img src="/images/developer-photo.jpg" alt="Portrait of the project developer" className="h-full w-full object-cover object-[center_25%]" />
             </div>
-            <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-400">Project developer</p>
-            <h2 className="mt-2 text-xl font-bold">Designed and developed by the project creator</h2>
+            <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-400">Created by</p>
+            <h2 className="mt-2 text-xl font-bold">Ahmed G. Sani</h2>
           </div>
         </div>
       </section>

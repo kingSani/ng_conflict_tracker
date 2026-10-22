@@ -42,7 +42,7 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
                 href="/"
                 className="font-bold tracking-tight text-lg uppercase bg-gradient-to-r from-zinc-900 dark:from-white to-zinc-500 dark:to-zinc-400 bg-clip-text text-transparent"
               >
-                NG Conflict<span className="text-emerald-500"> Tracker</span>
+                Conflict<span className="text-emerald-500">Tracker</span>
               </Link>
             </div>
 

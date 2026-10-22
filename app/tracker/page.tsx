@@ -141,7 +141,14 @@ export default function TrackerPage() {
       .sort((a, b) => a.localeCompare(b));
   }, [allEvents]);
 
-  const subEventTypesList = useMemo(() => Array.from(new Set(allEvents.map((ev) => ev.subEventType).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b)), [allEvents]);
+  const subEventTypeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const event of allEvents) {
+      if (event.subEventType) counts.set(event.subEventType, (counts.get(event.subEventType) ?? 0) + event.incidentCount);
+    }
+    return counts;
+  }, [allEvents]);
+  const subEventTypesList = useMemo(() => Array.from(subEventTypeCounts.keys()).sort((a, b) => a.localeCompare(b)), [subEventTypeCounts]);
 
   // ── Client-side filtering ─────────────────────────────────────────────────
   const controlFilteredEvents = useMemo(() => {
@@ -522,7 +529,7 @@ export default function TrackerPage() {
               <label className={`text-[11px] font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>ACLED event subtype</label>
               <select value={selectedSubEventType} onChange={(e) => setSelectedSubEventType(e.target.value)} className={`w-full border rounded-xl px-3 py-2.5 text-xs font-medium appearance-none focus:outline-none focus:border-emerald-600 ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-200" : "bg-white border-zinc-300 text-zinc-800"}`}>
                 <option value="">All event subtypes</option>
-                {subEventTypesList.map((subtype) => <option key={subtype} value={subtype}>{subtype}</option>)}
+                {subEventTypesList.map((subtype) => <option key={subtype} value={subtype}>{subtype === "Abduction/forced disappearance" ? `Kidnappings / forced abductions (ACLED: ${subtype}) · ${subEventTypeCounts.get(subtype)?.toLocaleString() ?? 0}` : `${subtype} · ${subEventTypeCounts.get(subtype)?.toLocaleString() ?? 0}`}</option>)}
               </select>
             </div>
 
@@ -665,19 +672,6 @@ export default function TrackerPage() {
             )}
           </div>
 
-          {loadState === "ready" && filteredEvents.length > 0 && (
-            <section className={`border-t p-4 space-y-2 ${isDark ? "border-zinc-900" : "border-zinc-200"}`}>
-              <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>ACLED narrative notes</p>
-              {filteredEvents.filter((ev) => ev.description).slice(0, 4).map((ev, i) => (
-                <button key={ev.eventId || i} type="button" onClick={() => { setSelectedConflict(ev); setMapFocus([...ev.coordinates] as [number, number]); }} className={`w-full rounded-xl border p-3 text-left ${isDark ? "bg-zinc-900/60 border-zinc-800 hover:bg-zinc-800" : "bg-white border-zinc-200 hover:bg-zinc-100"}`}>
-                  <span className={`text-[10px] font-semibold ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{ev.eventDate} · {ev.subEventType || ev.eventType}</span>
-                  <p className={`mt-1 text-xs leading-5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{ev.description}</p>
-                  <p className="mt-1 text-[10px] text-zinc-500">{ev.lga}, {ev.state}</p>
-                </button>
-              ))}
-              {!filteredEvents.some((ev) => ev.description) && <p className="text-xs leading-5 text-zinc-500">Narrative notes are not included in the monthly summary data. The supplied ACLED event file ends on 17 October 2025.</p>}
-            </section>
-          )}
 
           {/* Event list */}
           {loadState === "ready" && filteredEvents.length === 0 && (
@@ -764,25 +758,18 @@ export default function TrackerPage() {
 
           {selectedConflict && (
             <section
-              aria-label="Selected conflict details"
+              aria-label="Selected event notes"
               className={`absolute bottom-4 right-4 z-[1100] w-[min(26rem,calc(100%-2rem))] max-h-[55vh] overflow-y-auto rounded-2xl border p-4 shadow-2xl ${isDark ? "bg-zinc-950/95 border-zinc-700 text-zinc-100" : "bg-white/95 border-zinc-300 text-zinc-900"}`}
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>Conflict details</p>
+                  <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>Event notes</p>
                   <h2 className="mt-1 text-base font-bold">{selectedConflict.subEventType || selectedConflict.eventType || selectedConflict.alertType}</h2>
                 </div>
                 <button type="button" onClick={() => setSelectedConflict(null)} className={`rounded-lg px-2 py-1 text-lg leading-none ${isDark ? "text-zinc-400 hover:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100"}`} aria-label="Close conflict details">×</button>
               </div>
-              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                <div><dt className="text-zinc-500">Location</dt><dd className="mt-0.5 font-semibold">{selectedConflict.lga}, {selectedConflict.state}</dd></div>
-                <div><dt className="text-zinc-500">Date</dt><dd className="mt-0.5 font-semibold">{selectedConflict.eventDate || [selectedConflict.month, selectedConflict.year].join(" ")}</dd></div>
-                <div><dt className="text-zinc-500">Conflict type</dt><dd className="mt-0.5 font-semibold">{selectedConflict.eventType || selectedConflict.alertType}</dd></div>
-                <div><dt className="text-zinc-500">Reported fatalities</dt><dd className="mt-0.5 font-semibold text-red-500">{selectedConflict.reportedCasualties.toLocaleString()}</dd></div>
-                {selectedConflict.eventId && <div className="col-span-2"><dt className="text-zinc-500">ACLED event ID</dt><dd className="mt-0.5 font-mono">{selectedConflict.eventId}</dd></div>}
-              </dl>
               <div className={`mt-3 border-t pt-3 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
-                <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>ACLED notes</p>
+                <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>{selectedConflict.eventDate || [selectedConflict.month, selectedConflict.year].join(" ")} · {selectedConflict.lga}, {selectedConflict.state}</p>
                 <p className={`mt-1 text-xs leading-5 ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>{selectedConflict.description || "Narrative notes are not included in the monthly summary data. The supplied ACLED event file ends on 17 October 2025."}</p>
               </div>
             </section>
