@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { State, City } from "country-state-city";
+import { getNigeriaGeoData, NigeriaGeoData } from "./lib/nigeria-geo";
 
 export default function LandingPage() {
   interface ConflictEvent {
@@ -28,17 +28,26 @@ export default function LandingPage() {
   }, []);
   const router = useRouter();
 
-  // Load all Nigerian states instantly from local memory on the client side
-  const statesList = useMemo(() => State.getStatesOfCountry("NG"), []);
+  const [geoData, setGeoData] = useState<NigeriaGeoData | null>(null);
+  const [geoDataError, setGeoDataError] = useState(false);
 
+  useEffect(() => {
+    let active = true;
+    getNigeriaGeoData()
+      .then((data) => { if (active) setGeoData(data); })
+      .catch((error) => { console.error("Failed to load Nigeria Geo API data:", error); if (active) setGeoDataError(true); });
+    return () => { active = false; };
+  }, []);
+
+  const statesList = geoData?.states ?? [];
   const [selectedStateCode, setSelectedStateCode] = useState<string>("");
   const [selectedLga, setSelectedLga] = useState<string>("");
 
-  // Dynamically compute corresponding local governments instantly without network side-effects
+  const selectedState = statesList.find((state) => state.isoCode === selectedStateCode);
   const lgasList = useMemo(() => {
-    if (!selectedStateCode) return [];
-    return City.getCitiesOfState("NG", selectedStateCode);
-  }, [selectedStateCode]);
+    if (!selectedState || !geoData) return [];
+    return (geoData.lgasByState[selectedState.sourceName] ?? []).map((name) => ({ name }));
+  }, [geoData, selectedState]);
 
   const handleLaunchTracker = (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,7 +110,7 @@ export default function LandingPage() {
                   }}
                   className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-emerald-500 font-medium transition-colors cursor-pointer appearance-none"
                 >
-                  <option value="">Choose a State...</option>
+                  <option value="">{geoData ? "Choose a State..." : geoDataError ? "States unavailable" : "Loading states…"}</option>
                   {statesList.map((state) => (
                     <option key={state.isoCode} value={state.isoCode}>
                       {state.name.replace(" State", "")}
@@ -146,6 +155,7 @@ export default function LandingPage() {
             >
               View Active Map
             </button>
+            {geoDataError && <p className="text-xs text-red-500" role="status">Location lists could not be loaded. Please refresh and try again.</p>}
           </form>
         </div>
       </section>

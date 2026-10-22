@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NG Conflict Tracker
 
-## Getting Started
+An interactive Nigeria conflict event tracker with state and LGA filters, map-based exploration, event narratives, incident summaries, and light/dark themes.
 
-First, run the development server:
+## Features
+
+- Explore reported conflict incidents on an interactive map.
+- Filter by state, local government area, ACLED event type and subtype, year, and month.
+- Select an event to view its ACLED narrative note when one is available.
+- View monthly conflict summaries, including the available 2026 records.
+- Use the landing page to open the tracker for a selected location.
+
+## Requirements
+
+- Node.js compatible with the installed Next.js version.
+- npm.
+- A Mapbox public token for reverse geocoding map clicks.
+
+## Local setup
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Create `.env.local` in the repository root and add:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```dotenv
+NEXT_PUBLIC_MAPBOX_TOKEN=your_mapbox_token
+```
 
-## Learn More
+The token is used by the existing Mapbox reverse-geocoding helper. Do not commit real credentials.
 
-To learn more about Next.js, take a look at the following resources:
+## Useful commands
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run dev       # Start the development server
+npm run lint      # Run ESLint
+npm run build     # Build conflict data, then create a production build
+npm run start     # Serve the production build
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The build's `prebuild` step runs `scripts/build-conflict-data.ts` to generate the conflict dataset consumed by the app. Keep the source data files required by that script in place before building.
 
-## Deploy on Vercel
+## Data sources
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Administrative location lists:** [Temi Kolawole's Nigeria GeoJSON dataset](https://github.com/temikeezy/nigeria-geojson-data), served as static JSON through [GitHub Pages](https://temikeezy.github.io/nigeria-geojson-data/). The app reads `data/states.json` and `data/lgas.json` for its state and LGA selectors. See [Location data integration](docs/LOCATION_DATA.md).
+- **Map-click reverse geocoding:** Mapbox Geocoding API, configured with `NEXT_PUBLIC_MAPBOX_TOKEN`. The Nigeria GeoJSON project publishes static administrative data; it does not expose a coordinate-to-state/LGA reverse-geocoding endpoint.
+- **Conflict records:** the supplied ACLED event data and monthly summary files processed by the project data builder. Event narratives are available only where the source event records include notes.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Use the About page's attribution for the project creator. Retain upstream data attribution and licensing information when redistributing the source dataset or its derivatives.
+
+## Deployment
+
+Deploy as a Next.js application on a platform that supports the app's API routes and build command. Add `NEXT_PUBLIC_MAPBOX_TOKEN` to the deployment environment. Confirm the conflict source files are available at build time because the prebuild script generates the public conflict data.
+
+## Maintainer
+
+Created by **Ahmed G. Sani**.

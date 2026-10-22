@@ -18,7 +18,7 @@ import dynamic from "next/dynamic";
 import { useState, useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { getServerThemeSnapshot, getThemeSnapshot, setThemePreference, subscribeTheme } from "../lib/theme";
 import { useRouter, useSearchParams } from "next/navigation";
-import { State, City } from "country-state-city";
+import { getNigeriaGeoData, NigeriaGeoData } from "../lib/nigeria-geo";
 import { reverseGeocode } from "../../mapbox-geocode";
 
 const LiveTrackerMap = dynamic(() => import("../components/LiveTrackerMap"), {
@@ -74,7 +74,16 @@ export default function TrackerPage() {
   const router = useRouter();
 
   // ── Filter state ──────────────────────────────────────────────────────────
-  const statesList = useMemo(() => State.getStatesOfCountry("NG"), []);
+  const [geoData, setGeoData] = useState<NigeriaGeoData | null>(null);
+  const [geoDataError, setGeoDataError] = useState(false);
+  useEffect(() => {
+    let active = true;
+    getNigeriaGeoData()
+      .then((data) => { if (active) setGeoData(data); })
+      .catch((error) => { console.error("Failed to load Nigeria Geo API data:", error); if (active) setGeoDataError(true); });
+    return () => { active = false; };
+  }, []);
+  const statesList = useMemo(() => geoData?.states ?? [], [geoData]);
 
   const [selectedStateCode, setSelectedStateCode] = useState<string>(
     searchParams.get("stateCode") || "",
@@ -97,10 +106,11 @@ export default function TrackerPage() {
   const [visibleMapBounds, setVisibleMapBounds] = useState<[number, number, number, number] | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
+  const selectedState = statesList.find((state) => state.isoCode === selectedStateCode);
   const lgasList = useMemo(() => {
-    if (!selectedStateCode) return [];
-    return City.getCitiesOfState("NG", selectedStateCode);
-  }, [selectedStateCode]);
+    if (!selectedState || !geoData) return [];
+    return (geoData.lgasByState[selectedState.sourceName] ?? []).map((name) => ({ name }));
+  }, [geoData, selectedState]);
 
   // ── Data — fetched once ───────────────────────────────────────────────────
   const [allEvents, setAllEvents] = useState<ConflictEvent[]>([]);
@@ -236,13 +246,12 @@ export default function TrackerPage() {
             .replace(/ss/g, "s")
             .trim();
 
+        const geoData = await getNigeriaGeoData();
         const resultState = normalize(result.state);
         const matchedState = resultState
-          ? statesList.find((s) => {
+          ? geoData.states.find((s) => {
               const target = normalize(s.name);
-              return (
-                target.includes(resultState) || resultState.includes(target)
-              );
+              return target.includes(resultState) || resultState.includes(target);
             })
           : undefined;
 
@@ -251,12 +260,12 @@ export default function TrackerPage() {
 
           const resultLga = normalize(result.lga);
           if (resultLga) {
-            const lgas = City.getCitiesOfState("NG", matchedState.isoCode);
-            const matchedLga = lgas.find((c) => {
-              const target = normalize(c.name);
+            const lgas = geoData.lgasByState[matchedState.sourceName] ?? [];
+            const matchedLga = lgas.find((name) => {
+              const target = normalize(name);
               return target.includes(resultLga) || resultLga.includes(target);
             });
-            setSelectedLga(matchedLga?.name ?? "");
+            setSelectedLga(matchedLga ?? "");
           } else {
             setSelectedLga("");
           }
@@ -270,7 +279,7 @@ export default function TrackerPage() {
         console.error("Reverse geocode failed:", err);
       }
     },
-    [statesList],
+    [],
   );
 
   // Map click handler (passed down to LiveTrackerMap)
@@ -459,7 +468,7 @@ export default function TrackerPage() {
                       : "bg-white border-zinc-300 text-zinc-800"
                   }`}
                 >
-                  <option value="">All States</option>
+                  <option value="">{geoData ? "All States" : geoDataError ? "States unavailable" : "Loading states…"}</option>
                   {statesList.map((s) => (
                     <option key={s.isoCode} value={s.isoCode}>
                       {s.name.replace(/\s*State$/i, "")}
@@ -474,6 +483,7 @@ export default function TrackerPage() {
                   ▼
                 </span>
               </div>
+              {geoDataError && <p className="mt-1 text-[10px] text-red-500" role="status">Location lists could not be loaded. Refresh to try again.</p>}
             </div>
 
             {/* LGA dropdown */}
