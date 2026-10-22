@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { getServerThemeSnapshot, getThemeSnapshot, setThemePreference, subscribeTheme } from "./lib/theme";
 import { Inter } from "next/font/google";
 import Link from "next/link";
@@ -18,7 +18,6 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
   const isTrackerPage = pathname === "/tracker";
   const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
 
-  useEffect(() => { document.title = "NG Conflict Tracker"; }, []);
 
   const toggleTheme = () => {
     const nextTheme = theme === "light" ? "dark" : "light";

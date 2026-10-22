@@ -199,6 +199,7 @@ export default function TrackerPage() {
 
   // ── Map focus ─────────────────────────────────────────────────────────────
   const [mapFocus, setMapFocus] = useState<[number, number] | null>(null);
+  const [selectedConflict, setSelectedConflict] = useState<ConflictEvent | null>(null);
 
   // ── Reverse geocode → update dropdowns ───────────────────────────────────
   const [geoLoading, setGeoLoading] = useState(false);
@@ -680,9 +681,10 @@ export default function TrackerPage() {
               {filteredEvents.slice(0, 12).map((ev, i) => (
                 <button
                   key={i}
-                  onClick={() =>
-                    setMapFocus([...ev.coordinates] as [number, number])
-                  }
+                  onClick={() => {
+                    setSelectedConflict(ev);
+                    setMapFocus([...ev.coordinates] as [number, number]);
+                  }}
                   className={`w-full text-left p-2.5 rounded-xl border transition-all group ${
                     isDark
                       ? "bg-zinc-900/60 hover:bg-zinc-800/60 border-zinc-800/50 hover:border-zinc-700"
@@ -745,6 +747,29 @@ export default function TrackerPage() {
             cardFocusedCoords={mapFocus}
             theme={theme}
           />
+
+          {selectedConflict && (
+            <section
+              aria-label="Selected conflict details"
+              className={`absolute bottom-4 right-4 z-[1100] w-[min(26rem,calc(100%-2rem))] max-h-[55vh] overflow-y-auto rounded-2xl border p-4 shadow-2xl ${isDark ? "bg-zinc-950/95 border-zinc-700 text-zinc-100" : "bg-white/95 border-zinc-300 text-zinc-900"}`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? "text-emerald-400" : "text-emerald-700"}`}>Conflict details</p>
+                  <h2 className="mt-1 text-base font-bold">{selectedConflict.subEventType || selectedConflict.eventType || selectedConflict.alertType}</h2>
+                </div>
+                <button type="button" onClick={() => setSelectedConflict(null)} className={`rounded-lg px-2 py-1 text-lg leading-none ${isDark ? "text-zinc-400 hover:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100"}`} aria-label="Close conflict details">×</button>
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                <div><dt className="text-zinc-500">Location</dt><dd className="mt-0.5 font-semibold">{selectedConflict.lga}, {selectedConflict.state}</dd></div>
+                <div><dt className="text-zinc-500">Date</dt><dd className="mt-0.5 font-semibold">{selectedConflict.eventDate || [selectedConflict.month, selectedConflict.year].join(" ")}</dd></div>
+                <div><dt className="text-zinc-500">Conflict type</dt><dd className="mt-0.5 font-semibold">{selectedConflict.eventType || selectedConflict.alertType}</dd></div>
+                <div><dt className="text-zinc-500">Reported fatalities</dt><dd className="mt-0.5 font-semibold text-red-500">{selectedConflict.reportedCasualties.toLocaleString()}</dd></div>
+                {selectedConflict.eventId && <div className="col-span-2"><dt className="text-zinc-500">ACLED event ID</dt><dd className="mt-0.5 font-mono">{selectedConflict.eventId}</dd></div>}
+              </dl>
+              {selectedConflict.description && <p className={`mt-3 border-t pt-3 text-xs leading-5 ${isDark ? "border-zinc-800 text-zinc-300" : "border-zinc-200 text-zinc-700"}`}>{selectedConflict.description}</p>}
+            </section>
+          )}
 
           {loadState === "loading" && (
             <div

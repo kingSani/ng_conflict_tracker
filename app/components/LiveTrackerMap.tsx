@@ -26,6 +26,7 @@ interface IncidentMarker {
   eventType?: string;
   subEventType?: string;
   eventDate?: string;
+  eventId?: string;
   description?: string;
   coordinates: [number, number];
 }
@@ -287,6 +288,7 @@ export default function LiveTrackerMap({
                     <p className="text-[10px] text-zinc-500 font-medium">
                       {incident.eventDate || `${incident.month} ${incident.year}`}
                     </p>
+                    {incident.eventId && <p className="text-[9px] font-mono text-zinc-500">ACLED ID: {incident.eventId}</p>}
                     {incident.description && <p className="max-w-[280px] whitespace-normal text-[10px] leading-4 text-zinc-700">{incident.description}</p>}
                     <div className="text-[11px] font-mono border-t pt-1 mt-1 flex gap-3">
                       <span>
