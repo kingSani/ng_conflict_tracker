@@ -16,7 +16,9 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const isTrackerPage = pathname === "/tracker";
-  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);\n\n  useEffect(() => { document.title = "NG Conflict Tracker"; }, []);
+  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
+
+  useEffect(() => { document.title = "NG Conflict Tracker"; }, []);
 
   const toggleTheme = () => {
     const nextTheme = theme === "light" ? "dark" : "light";
@@ -41,7 +43,7 @@ function LayoutHeaderAndContent({ children }: { children: React.ReactNode }) {
                 href="/"
                 className="font-bold tracking-tight text-lg uppercase bg-gradient-to-r from-zinc-900 dark:from-white to-zinc-500 dark:to-zinc-400 bg-clip-text text-transparent"
               >
-                NG Conflict<span className="text-emerald-500">Tracker</span>
+                NG Conflict<span className="text-emerald-500"> Tracker</span>
               </Link>
             </div>
 
