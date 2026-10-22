@@ -42,11 +42,11 @@ npm run build     # Build conflict data, then create a production build
 npm run start     # Serve the production build
 ```
 
-The build's `prebuild` step runs `scripts/build-conflict-data.ts` to generate the conflict dataset consumed by the app. Keep the source data files required by that script in place before building.
+The build's `prebuild` step runs `scripts/build-conflict-data.ts` to generate the conflict dataset consumed by the app. Keep the source data files required by that script in place before building. The tracker initially requests only the latest year; choose **All Years** to load the full history.
 
 ## Data sources
 
-- **Administrative location lists:** [Temi Kolawole's Nigeria GeoJSON dataset](https://github.com/temikeezy/nigeria-geojson-data), served as static JSON through [GitHub Pages](https://temikeezy.github.io/nigeria-geojson-data/). The app reads `data/states.json` and `data/lgas.json` for its state and LGA selectors. See [Location data integration](docs/LOCATION_DATA.md).
+- **Administrative location lists:** [Temi Kolawole's Nigeria GeoJSON dataset](https://github.com/temikeezy/nigeria-geojson-data), served as static JSON through [GitHub Pages](https://temikeezy.github.io/nigeria-geojson-data/). The app reads `data/states.json` and `data/lgas.json` for its state and LGA selectors. See [Location data integration](docs/LOCATION_DATA.md) and [Conflict data build/API](docs/CONFLICT_DATA.md).
 - **Map-click reverse geocoding:** Mapbox Geocoding API, configured with `NEXT_PUBLIC_MAPBOX_TOKEN`. The Nigeria GeoJSON project publishes static administrative data; it does not expose a coordinate-to-state/LGA reverse-geocoding endpoint.
 - **Conflict records:** the supplied ACLED event data and monthly summary files processed by the project data builder. Event narratives are available only where the source event records include notes.
 

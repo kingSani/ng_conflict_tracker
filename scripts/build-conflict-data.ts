@@ -53,7 +53,6 @@ interface ConflictRow {
 const GEO_URL =
   "https://temikeezy.github.io/nigeria-geojson-data/data/full.json";
 const DATA_DIR = path.join(process.cwd(), "public", "data");
-const OUT_FILE = path.join(DATA_DIR, "conflict-data.json");
 const NIGERIA_FALLBACK: [number, number] = [9.082, 8.6753];
 
 const MONTH_ORDER: Record<string, number> = {
@@ -213,13 +212,45 @@ async function main() {
     return (MONTH_ORDER[b.month] ?? 0) - (MONTH_ORDER[a.month] ?? 0);
   });
 
-  // 4. Write output
-  fs.writeFileSync(OUT_FILE, JSON.stringify(merged), "utf-8");
+  // 4. Write compact year partitions and filter metadata. The API reads only
+  // the selected year, avoiding a full-dataset parse on the first request.
+  const groupedByYear = new Map<number, ConflictRow[]>();
+  for (const row of merged) {
+    const yearRows = groupedByYear.get(row.year) ?? [];
+    yearRows.push(row);
+    groupedByYear.set(row.year, yearRows);
+  }
 
-  const sizeKb = (fs.statSync(OUT_FILE).size / 1024).toFixed(1);
-  console.log(
-    `[build-conflict-data] Done. ${merged.length} rows → ${OUT_FILE} (${sizeKb} KB)`
-  );
+  const recentRows = merged.filter((row) => row.year >= 2021);
+  const years = Array.from(new Set(recentRows.map((row) => row.year))).sort((a, b) => b - a);
+  const categories = Array.from(new Set(recentRows.map((row) => row.eventType || row.alertType)))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  const subEventTypeCounts = new Map<string, number>();
+  for (const row of recentRows) {
+    if (row.subEventType) {
+      subEventTypeCounts.set(row.subEventType, (subEventTypeCounts.get(row.subEventType) ?? 0) + row.incidentCount);
+    }
+  }
+
+  for (const file of fs.readdirSync(DATA_DIR)) {
+    if (/^conflict-data(?:-\d{4})?\.json$/.test(file)) fs.unlinkSync(path.join(DATA_DIR, file));
+  }
+  for (const [year, rows] of groupedByYear) {
+    fs.writeFileSync(path.join(DATA_DIR, `conflict-data-${year}.json`), JSON.stringify(rows), "utf-8");
+  }
+  const metadata = {
+    years,
+    categories,
+    subEventTypeCounts: Object.fromEntries(subEventTypeCounts),
+    totalRows: recentRows.length,
+  };
+  fs.writeFileSync(path.join(DATA_DIR, "conflict-data-meta.json"), JSON.stringify(metadata), "utf-8");
+
+  const totalKb = (fs.readdirSync(DATA_DIR)
+    .filter((file) => /^conflict-data(?:-\d{4})?\.json$/.test(file))
+    .reduce((total, file) => total + fs.statSync(path.join(DATA_DIR, file)).size, 0) / 1024).toFixed(1);
+  console.log(`[build-conflict-data] Done. ${merged.length} rows across ${groupedByYear.size} year files (${totalKb} KB total)`);
 }
 
 main().catch((err) => {

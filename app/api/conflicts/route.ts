@@ -26,62 +26,64 @@ interface ConflictRow {
   coordinates: [number, number];
 }
 
-const DATA_FILE = path.join(
-  process.cwd(),
-  "public",
-  "data",
-  "conflict-data.json",
-);
+const DATA_DIR = path.join(process.cwd(), "public", "data");
+const METADATA_FILE = path.join(DATA_DIR, "conflict-data-meta.json");
+let cachedMetadata: ConflictMetadata | null = null;
+const cachedYears = new Map<number, ConflictRow[]>();
 
-// Module-level cache — survives across requests in the same worker process.
-// The file only changes on redeploy so this is always safe.
-let cachedData: ConflictRow[] | null = null;
-
-function getAllData(): ConflictRow[] {
-  if (cachedData) return cachedData;
-
-  if (!fs.existsSync(DATA_FILE)) {
-    throw new Error(
-      "conflict-data.json not found. Run `npm run build` (or the prebuild script) first.",
-    );
-  }
-
-  cachedData = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8")) as ConflictRow[];
-  return cachedData;
+interface ConflictMetadata {
+  years: number[];
+  categories: string[];
+  subEventTypeCounts: Record<string, number>;
+  totalRows: number;
 }
 
-const MONTH_ORDER: Record<string, number> = {
-  January: 1,
-  February: 2,
-  March: 3,
-  April: 4,
-  May: 5,
-  June: 6,
-  July: 7,
-  August: 8,
-  September: 9,
-  October: 10,
-  November: 11,
-  December: 12,
-};
+function getMetadata(): ConflictMetadata {
+  if (cachedMetadata) return cachedMetadata;
+  if (!fs.existsSync(METADATA_FILE)) {
+    throw new Error("Conflict metadata not found. Run `npm run data:build` first.");
+  }
+  cachedMetadata = JSON.parse(fs.readFileSync(METADATA_FILE, "utf-8")) as ConflictMetadata;
+  return cachedMetadata;
+}
+
+function getYearData(year: number): ConflictRow[] {
+  const cached = cachedYears.get(year);
+  if (cached) return cached;
+  const dataFile = path.join(DATA_DIR, `conflict-data-${year}.json`);
+  if (!fs.existsSync(dataFile)) return [];
+  const rows = JSON.parse(fs.readFileSync(dataFile, "utf-8")) as ConflictRow[];
+  cachedYears.set(year, rows);
+  return rows;
+}
+
+
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const startYear = parseInt(searchParams.get("startYear") || "2021", 10);
+    const metadata = getMetadata();
+    if (searchParams.get("meta") === "1") {
+      return NextResponse.json(metadata, {
+        headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=3600" },
+      });
+    }
 
-    const all = getAllData();
+    const requestedYear = searchParams.get("year");
+    if (requestedYear && !/^\d{4}$/.test(requestedYear)) {
+      return NextResponse.json({ error: "Invalid year" }, { status: 400 });
+    }
+    const startYear = Number.parseInt(searchParams.get("startYear") || "2021", 10);
+    const years = requestedYear
+      ? [Number.parseInt(requestedYear, 10)]
+      : metadata.years.filter((year) => startYear <= 0 || year >= startYear);
+    const filtered = years.flatMap(getYearData);
 
-    // Only year-filter here. State/LGA filtering is done client-side.
-    const filtered =
-      startYear > 0 ? all.filter((r) => r.year >= startYear) : all;
-
-    filtered.sort((a, b) => {
-      if (b.year !== a.year) return b.year - a.year;
-      return (MONTH_ORDER[b.month] ?? 0) - (MONTH_ORDER[a.month] ?? 0);
+    const requestedLimit = Number.parseInt(searchParams.get("limit") || "0", 10);
+    const result = requestedLimit > 0 ? filtered.slice(0, requestedLimit) : filtered;
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=3600" },
     });
-
-    return NextResponse.json(filtered);
   } catch (err) {
     console.error("[conflicts API]", err);
     return NextResponse.json(

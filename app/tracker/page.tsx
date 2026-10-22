@@ -16,7 +16,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useState, useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { useState, useMemo, useEffect, useCallback, useSyncExternalStore } from "react";
 import { getServerThemeSnapshot, getThemeSnapshot, setThemePreference, subscribeTheme } from "../lib/theme";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getNigeriaGeoData, NigeriaGeoData } from "../lib/nigeria-geo";
@@ -51,6 +51,12 @@ interface ConflictEvent {
   coordinates: [number, number];
 }
 
+interface ConflictMetadata {
+  years: number[];
+  categories: string[];
+  subEventTypeCounts: Record<string, number>;
+  totalRows: number;
+}
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 const MONTH_ORDER = [
@@ -93,7 +99,7 @@ export default function TrackerPage() {
     searchParams.get("lga") || "",
   );
   const [selectedYear, setSelectedYear] = useState<string>(
-    searchParams.get("year") || "",
+    searchParams.get("year") || "2026",
   );
   const [selectedMonth, setSelectedMonth] = useState<string>(
     searchParams.get("month") || "",
@@ -114,53 +120,65 @@ export default function TrackerPage() {
     return (geoData.lgasByState[selectedState.sourceName] ?? []).map((name) => ({ name }));
   }, [geoData, selectedState]);
 
-  // ── Data — fetched once ───────────────────────────────────────────────────
+  // Load global filter metadata separately from the selected year's event rows.
   const [allEvents, setAllEvents] = useState<ConflictEvent[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>("idle");
-  const hasFetched = useRef(false);
+  const [metadata, setMetadata] = useState<ConflictMetadata | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
 
   useEffect(() => {
-    if (hasFetched.current) return;
-    hasFetched.current = true;
-    setLoadState("loading");
-
-    fetch("/api/conflicts?startYear=2021")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+    const controller = new AbortController();
+    fetch("/api/conflicts?meta=1", { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<ConflictMetadata>;
       })
-      .then((data: ConflictEvent[]) => {
+      .then(setMetadata)
+      .catch((error) => {
+        if (!controller.signal.aborted) console.error("Failed to load conflict filter metadata:", error);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const query = selectedYear
+      ? `year=${encodeURIComponent(selectedYear)}`
+      : "startYear=2021";
+
+    fetch(`/api/conflicts?${query}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<ConflictEvent[]>;
+      })
+      .then((data) => {
         setAllEvents(data);
         setLoadState("ready");
       })
-      .catch(() => setLoadState("error"));
-  }, []);
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load conflict records:", error);
+          setLoadState("error");
+        }
+      });
+    return () => controller.abort();
+  }, [selectedYear]);
 
-  // ── Date filter option lists — derived from whatever is actually in the data
-  const yearsList = useMemo(() => {
-    const years = Array.from(new Set(allEvents.map((ev) => ev.year)));
-    return years.sort((a, b) => b - a);
-  }, [allEvents]);
-
+  // Filter choices use compact metadata, so every year and ACLED subtype is available without downloading every event.
+  const yearsList = metadata?.years ?? [];
   const monthsList = useMemo(() => {
     const months = new Set(allEvents.map((ev) => ev.month));
     return MONTH_ORDER.filter((m) => months.has(m));
   }, [allEvents]);
-
-  const categoriesList = useMemo(() => {
-    return Array.from(new Set(allEvents.map((ev) => ev.eventType || ev.alertType)))
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
-  }, [allEvents]);
-
-  const subEventTypeCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const event of allEvents) {
-      if (event.subEventType) counts.set(event.subEventType, (counts.get(event.subEventType) ?? 0) + event.incidentCount);
-    }
-    return counts;
-  }, [allEvents]);
-  const subEventTypesList = useMemo(() => Array.from(subEventTypeCounts.keys()).sort((a, b) => a.localeCompare(b)), [subEventTypeCounts]);
+  const categoriesList = metadata?.categories ?? [];
+  const subEventTypeCounts = useMemo(
+    () => new Map(Object.entries(metadata?.subEventTypeCounts ?? {})),
+    [metadata],
+  );
+  const subEventTypesList = useMemo(
+    () => Array.from(subEventTypeCounts.keys()).sort((a, b) => a.localeCompare(b)),
+    [subEventTypeCounts],
+  );
 
   // ── Client-side filtering ─────────────────────────────────────────────────
   const controlFilteredEvents = useMemo(() => {
@@ -561,7 +579,7 @@ export default function TrackerPage() {
                 <div className="relative">
                   <select
                     value={selectedYear}
-                    onChange={(e) => setSelectedYear(e.target.value)}
+                    onChange={(e) => { setLoadState("loading"); setAllEvents([]); setSelectedYear(e.target.value); }}
                     className={`w-full border rounded-xl px-3 py-2.5 text-xs font-medium transition-colors cursor-pointer appearance-none focus:outline-none focus:border-emerald-600 ${
                       isDark
                         ? "bg-zinc-900 border-zinc-800 text-zinc-200"
@@ -679,7 +697,7 @@ export default function TrackerPage() {
                 />
                 <Stat
                   label="Total dataset"
-                  value={allEvents.length}
+                  value={metadata?.totalRows ?? allEvents.length}
                   dim
                   isDark={isDark}
                 />

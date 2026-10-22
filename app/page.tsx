@@ -21,9 +21,9 @@ export default function LandingPage() {
 
   useEffect(() => {
     // Pull default overview metrics directly from the new shared API route
-    fetch("/api/conflicts?startYear=2026")
+    fetch("/api/conflicts?year=2026&limit=3")
       .then((res) => res.json())
-      .then((data) => setPreviewAlerts(data.slice(0, 3)))
+      .then((data) => setPreviewAlerts(data))
       .catch((err) => console.error(err));
   }, []);
   const router = useRouter();
