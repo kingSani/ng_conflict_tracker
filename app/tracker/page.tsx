@@ -15,6 +15,7 @@
  */
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useState, useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { getServerThemeSnapshot, getThemeSnapshot, setThemePreference, subscribeTheme } from "../lib/theme";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -105,6 +106,7 @@ export default function TrackerPage() {
   );
   const [visibleMapBounds, setVisibleMapBounds] = useState<[number, number, number, number] | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileEventsOpen, setIsMobileEventsOpen] = useState(false);
 
   const selectedState = statesList.find((state) => state.isoCode === selectedStateCode);
   const lgasList = useMemo(() => {
@@ -358,15 +360,11 @@ export default function TrackerPage() {
         }`}
       >
         <div className="flex items-center gap-3">
-          <span
-            className={`text-xs font-bold tracking-wide ${
-              isDark ? "text-zinc-100" : "text-zinc-900"
-            }`}
-          >
-            NigeriaWatch · Live Tracker
-          </span>
+          <Link href="/" className={`text-xs font-bold tracking-tight ${isDark ? "text-zinc-100" : "text-zinc-900"}`} aria-label="ConflictTracker home">
+            Conflict<span className="text-emerald-500">Tracker</span>
+          </Link>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
         <button
           type="button"
           className="md:hidden text-[10px] font-medium px-2.5 py-1 rounded-lg border border-emerald-700 text-emerald-700 dark:text-emerald-300 dark:border-emerald-800"
@@ -374,6 +372,13 @@ export default function TrackerPage() {
           onClick={() => setIsMobileSidebarOpen((open) => !open)}
         >
           {isMobileSidebarOpen ? "Hide filters" : "Filters"}
+        </button>        <button
+          type="button"
+          className={`md:hidden text-[10px] font-medium px-2 py-1 rounded-lg border ${isDark ? "border-zinc-700 text-zinc-300" : "border-zinc-300 text-zinc-700"}`}
+          aria-expanded={isMobileEventsOpen}
+          onClick={() => setIsMobileEventsOpen((open) => !open)}
+        >
+          Events {loadState === "ready" ? filteredEvents.length : "…"}
         </button>
         <button
           onClick={toggleTheme}
@@ -765,6 +770,32 @@ export default function TrackerPage() {
             cardFocusedCoords={mapFocus}
             theme={theme}
           />
+
+          {isMobileEventsOpen && (
+            <section aria-label="Conflict events in the current map view" className={`md:hidden absolute inset-x-2 bottom-2 z-[1200] max-h-[52%] overflow-hidden rounded-2xl border shadow-2xl ${isDark ? "bg-zinc-950/95 border-zinc-700 text-zinc-100" : "bg-white/95 border-zinc-300 text-zinc-900"}`}>
+              <div className={`flex items-center justify-between gap-3 border-b px-4 py-3 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+                <div>
+                  <p className="text-xs font-bold">Incidents in this map view</p>
+                  <p className="mt-0.5 text-[10px] text-zinc-500">{filteredEvents.length.toLocaleString()} records · tap one for its notes</p>
+                </div>
+                <button type="button" onClick={() => setIsMobileEventsOpen(false)} className="rounded-lg px-2 py-1 text-lg leading-none text-zinc-500" aria-label="Close incident list">×</button>
+              </div>
+              <div className="max-h-[calc(52vh-4rem)] space-y-2 overflow-y-auto p-3">
+                {loadState === "loading" && <p className="py-4 text-center text-xs text-zinc-500">Loading conflict records…</p>}
+                {loadState === "error" && <p className="py-4 text-center text-xs text-red-500">Conflict records could not be loaded. Refresh the page to retry.</p>}
+                {loadState === "ready" && filteredEvents.length === 0 && <p className="py-4 text-center text-xs text-zinc-500">No incidents in this map view.</p>}
+                {filteredEvents.slice(0, 50).map((event, index) => (
+                  <button key={event.eventId || `${event.state}-${event.lga}-${event.year}-${index}`} type="button" onClick={() => { setSelectedConflict(event); setMapFocus([...event.coordinates] as [number, number]); setIsMobileEventsOpen(false); }} className={`w-full rounded-xl border p-3 text-left ${isDark ? "bg-zinc-900/70 border-zinc-800" : "bg-zinc-50 border-zinc-200"}`}>
+                    <span className={`text-[10px] font-semibold ${isDark ? "text-emerald-300" : "text-emerald-700"}`}>{event.subEventType || event.eventType || event.alertType}</span>
+                    <p className="mt-1 text-xs font-semibold">{event.lga}, {event.state} · {event.eventDate || `${event.month} ${event.year}`}</p>
+                    {event.description && <p className={`mt-1 text-[11px] leading-4 line-clamp-2 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>{event.description}</p>}
+                    <p className="mt-1 text-[10px] text-zinc-500">{event.incidentCount.toLocaleString()} incidents · {event.reportedCasualties.toLocaleString()} casualties</p>
+                  </button>
+                ))}
+                {loadState === "ready" && filteredEvents.length > 50 && <p className="py-2 text-center text-[10px] text-zinc-500">Showing the 50 most recent records. Zoom in or filter to narrow the list.</p>}
+              </div>
+            </section>
+          )}
 
           {selectedConflict && (
             <section

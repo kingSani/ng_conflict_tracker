@@ -3,8 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npm run data:build",
     "dev": "next dev",
-    "prebuild": "npx ts-node --project tsconfig.scripts.json scripts/build-conflict-data.ts",
+    "data:build": "npx ts-node --project tsconfig.scripts.json scripts/build-conflict-data.ts",
+    "prebuild": "npm run data:build",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
